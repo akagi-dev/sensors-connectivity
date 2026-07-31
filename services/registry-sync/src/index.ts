@@ -41,11 +41,14 @@ interface RegistrySyncDependencies {
   sleep?: (ms: number) => Promise<void>;
 }
 
+type RedisConstructor = new (url: string) => RedisLike;
+
 export function createRegistrySyncService(
   deps: RegistrySyncDependencies = {}
 ): RegistrySyncService {
   const config = deps.config ?? loadRegistrySyncConfig();
-  const redis = deps.redis ?? new Redis(config.redisUrl);
+  const RedisClient = Redis as unknown as RedisConstructor;
+  const redis = deps.redis ?? new RedisClient(config.redisUrl);
   const keyspace = createRedisKeyspace(config.redisKeyPrefix);
   const projectionStore = new RedisProjectionStore(redis, keyspace);
   const retryStore = new RedisRetryCounterStore(redis, keyspace);
@@ -67,7 +70,8 @@ export function createRegistrySyncService(
     const eventId = toChainEventId(event);
     metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, event.blockHeight);
 
-    while (true) {
+    let pending = true;
+    while (pending) {
       const result = await runConsumerProcessingRule(event, {
         retryPolicy: {
           maxAttempts: config.maxRetries,
@@ -163,7 +167,7 @@ export function createRegistrySyncService(
         metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
       }
 
-      return;
+      pending = false;
     }
   }
 

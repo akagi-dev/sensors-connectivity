@@ -33,9 +33,23 @@ describe('keyspace and mapping', () => {
     expect(disabled).toEqual({ sensorAddress: 'sensor-1', publicKey: 'pk-1', enabled: false });
   });
 
+  it('maps rws.NewDevices addresses as eligible records', () => {
+    const projected = mapRegistryEventToUpdate({
+      blockHeight: 50,
+      eventIndex: 1,
+      section: 'rws',
+      method: 'NewDevices',
+      sensorAddress: 'sensor-eligible'
+    });
+
+    expect(projected).toEqual({
+      sensorAddress: 'sensor-eligible',
+      publicKey: 'sensor-eligible',
+      enabled: true
+    });
+  });
+
   it('uses chain identity as idempotency key', () => {
-    expect(
-      toChainEventId({ blockHeight: 42, eventIndex: 7, section: 'registry', method: 'x' })
-    ).toBe('42:7');
+    expect(toChainEventId({ blockHeight: 42, eventIndex: 7 })).toBe('42:7');
   });
 });

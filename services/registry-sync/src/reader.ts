@@ -72,6 +72,7 @@ export class RedisRegistryReader implements RegistryReader {
 }
 
 let sharedRedisReader: RedisRegistryReader | null = null;
+type RedisConstructor = new (url: string) => RedisLike;
 
 export function createRegistryReaderFromEnv(): RegistryReader {
   if (sharedRedisReader) {
@@ -79,7 +80,8 @@ export function createRegistryReaderFromEnv(): RegistryReader {
   }
 
   const config = loadRegistrySyncConfig();
-  const redis = new Redis(config.redisUrl);
+  const RedisClient = Redis as unknown as RedisConstructor;
+  const redis = new RedisClient(config.redisUrl);
   sharedRedisReader = new RedisRegistryReader(redis, config.redisKeyPrefix, config.nonceTtlSeconds);
   return sharedRedisReader;
 }

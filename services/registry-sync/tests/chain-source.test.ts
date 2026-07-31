@@ -60,4 +60,29 @@ describe('normalizeRegistryEvents', () => {
 
     expect(normalizeRegistryEvents(records as never, 121)).toEqual([]);
   });
+
+  it('expands rws.NewDevices addresses into eligible events', () => {
+    const records = [
+      {
+        event: {
+          section: 'rws',
+          method: 'NewDevices',
+          data: {
+            toJSON: () => ({ devices: ['sensor-a', 'sensor-b'] })
+          }
+        },
+        phase: {
+          isApplyExtrinsic: true,
+          asApplyExtrinsic: { toNumber: () => 4 }
+        }
+      }
+    ];
+
+    const normalized = normalizeRegistryEvents(records as never, 140);
+    expect(normalized).toHaveLength(2);
+    expect(normalized[0]?.sensorAddress).toBe('sensor-a');
+    expect(normalized[1]?.sensorAddress).toBe('sensor-b');
+    expect(normalized[0]?.enabled).toBe(true);
+    expect(normalized[1]?.enabled).toBe(true);
+  });
 });

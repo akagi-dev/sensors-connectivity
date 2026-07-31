@@ -25,6 +25,5 @@ Authorizer reads sensor status/public key from the sensor hash and uses nonce ke
 
 Registry events are parsed from finalized chain event records. Projection requires resolved fields:
 
-- `sensorAddress`/`sensor_address`
-- `publicKey`/`public_key`
-- optional `enabled` boolean (otherwise inferred from method name: create/update/enable => true, disable/revoke/remove => false)
+- `rws.NewDevices` (emitted by `set_devices` extrinsic): every address in `devices` becomes eligible (`enabled=true`) for Authorizer.
+- For other registry-shaped events: use resolved `sensorAddress`/`sensor_address` and `publicKey`/`public_key`; optional `enabled` is inferred from method names when omitted.

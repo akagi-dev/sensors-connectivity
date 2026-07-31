@@ -51,12 +51,15 @@ export function toChainEventId(event: Pick<RegistryEvent, 'blockHeight' | 'event
 
 export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate | null {
   const sensorAddress = event.sensorAddress?.trim();
-  const publicKey = event.publicKey?.trim();
+  const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
+  const publicKey =
+    event.publicKey?.trim() ??
+    (normalizedMethod === 'rws.set_devices' || normalizedMethod === 'rws.newdevices'
+      ? sensorAddress
+      : undefined);
   if (!sensorAddress || !publicKey) {
     return null;
   }
-
-  const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
 
   const explicitEnabled = event.enabled;
   const impliedDisabled =

@@ -1,6 +1,4 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
-import type { Header } from '@polkadot/types/interfaces/runtime';
-import type { EventRecord } from '@polkadot/types/interfaces/system';
 import type { RegistryEvent } from './keyspace.js';
 
 export interface FinalizedRegistryEventSource {
@@ -37,7 +35,9 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
   async getLatestFinalizedHeight(): Promise<number> {
     const api = this.requireApi();
-    const header = await api.rpc.chain.getFinalizedHead().then((hash) => api.rpc.chain.getHeader(hash));
+    const header = await api.rpc.chain
+      .getFinalizedHead()
+      .then((hash) => api.rpc.chain.getHeader(hash));
     return header.number.toNumber();
   }
 
@@ -47,7 +47,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
   ): Promise<void> {
     const api = this.requireApi();
 
-    this.unsubscribe = await api.rpc.chain.subscribeFinalizedHeads((header: Header) => {
+    this.unsubscribe = await api.rpc.chain.subscribeFinalizedHeads((header: HeaderLike) => {
       this.processing = this.processing
         .then(async () => {
           const height = header.number.toNumber();
@@ -55,15 +55,19 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
             return;
           }
 
-          const blockHash = header.hash;
-          const events = await api.query.system.events.at(blockHash);
-          const normalized = normalizeRegistryEvents(events, height);
+          const eventsQuery = api.query.system?.events;
+          if (!eventsQuery) {
+            return;
+          }
+
+          const codec = await eventsQuery.at(header.hash as never);
+          const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
           for (const event of normalized) {
             await onEvent(event);
           }
         })
         .catch(() => {
-          // keep subscription alive; service-level retry handles processing errors.
+          return;
         });
     });
   }
@@ -86,7 +90,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 }
 
 export function normalizeRegistryEvents(
-  records: readonly EventRecord[],
+  records: readonly EventRecordLike[],
   blockHeight: number
 ): RegistryEvent[] {
   const registryEvents: RegistryEvent[] = [];
@@ -100,30 +104,86 @@ export function normalizeRegistryEvents(
       return;
     }
 
-    const eventIndex =
-      record.phase.isApplyExtrinsic
-        ? record.phase.asApplyExtrinsic.toNumber()
-        : fallbackIndex;
+    const eventIndex = record.phase.isApplyExtrinsic
+      ? record.phase.asApplyExtrinsic.toNumber()
+      : fallbackIndex;
 
     const rawData = safeToJson(record.event.data);
-    const extracted = extractRegistryFields(rawData);
+    const extractedEntries = extractRegistryEntries(rawData, loweredIdentity);
 
-    registryEvents.push({
-      blockHeight,
-      eventIndex,
-      section,
-      method,
-      sensorAddress: extracted.sensorAddress,
-      publicKey: extracted.publicKey,
-      enabled: extracted.enabled,
-      rawData
+    if (extractedEntries.length === 0) {
+      registryEvents.push({
+        blockHeight,
+        eventIndex,
+        section,
+        method,
+        rawData
+      });
+      return;
+    }
+
+    extractedEntries.forEach((entry, entryIndex) => {
+      const normalizedIndex =
+        extractedEntries.length === 1
+          ? eventIndex
+          : eventIndex * 10_000 + entryIndex;
+
+      const candidate: RegistryEvent = {
+        blockHeight,
+        eventIndex: normalizedIndex,
+        section,
+        method,
+        rawData
+      };
+
+      if (entry.sensorAddress) {
+        candidate.sensorAddress = entry.sensorAddress;
+      }
+      if (entry.publicKey) {
+        candidate.publicKey = entry.publicKey;
+      }
+      if (typeof entry.enabled === 'boolean') {
+        candidate.enabled = entry.enabled;
+      }
+
+      registryEvents.push(candidate);
     });
   });
 
   return registryEvents;
 }
 
+function toEventRecords(codec: unknown): EventRecordLike[] {
+  if (!codec || typeof codec !== 'object') {
+    return [];
+  }
+
+  const candidate = codec as { toArray?: () => unknown[] };
+  if (typeof candidate.toArray === 'function') {
+    return candidate.toArray().filter(isEventRecordLike);
+  }
+
+  if (Array.isArray(codec)) {
+    return codec.filter(isEventRecordLike);
+  }
+
+  return [];
+}
+
+function isEventRecordLike(value: unknown): value is EventRecordLike {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const record = value as Partial<EventRecordLike>;
+  return Boolean(record.event) && Boolean(record.phase);
+}
+
 function looksLikeRegistryEvent(name: string): boolean {
+  if (name === 'rws.newdevices' || name === 'rws.set_devices') {
+    return true;
+  }
+
   if (name.includes('registry')) {
     return true;
   }
@@ -151,6 +211,51 @@ function safeToJson(data: { toJSON?: () => unknown; toHuman?: () => unknown }): 
   return undefined;
 }
 
+function extractRegistryEntries(
+  raw: unknown,
+  normalizedIdentity: string
+): Array<{ sensorAddress?: string; publicKey?: string; enabled?: boolean }> {
+  if (normalizedIdentity === 'rws.newdevices' || normalizedIdentity === 'rws.set_devices') {
+    const addresses = extractDeviceAddresses(raw);
+    return addresses.map((address) => ({
+      sensorAddress: address,
+      publicKey: address,
+      enabled: true
+    }));
+  }
+
+  return [extractRegistryFields(raw)];
+}
+
+function extractDeviceAddresses(raw: unknown): string[] {
+  if (Array.isArray(raw) && raw.every((value) => typeof value === 'string')) {
+    return raw.filter((value): value is string => value.trim().length > 0);
+  }
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const nested = extractDeviceAddresses(item);
+      if (nested.length > 0) {
+        return nested;
+      }
+    }
+  }
+
+  if (raw && typeof raw === 'object') {
+    const objectValue = raw as Record<string, unknown>;
+    for (const [key, value] of Object.entries(objectValue)) {
+      if (key.toLowerCase().includes('device')) {
+        const nested = extractDeviceAddresses(value);
+        if (nested.length > 0) {
+          return nested;
+        }
+      }
+    }
+  }
+
+  return [];
+}
+
 function extractRegistryFields(raw: unknown): {
   sensorAddress?: string;
   publicKey?: string;
@@ -164,11 +269,17 @@ function extractRegistryFields(raw: unknown): {
     findStringByPosition(raw, 1);
   const enabled = inferEnabled(raw);
 
-  return {
-    sensorAddress,
-    publicKey,
-    enabled
-  };
+  const result: { sensorAddress?: string; publicKey?: string; enabled?: boolean } = {};
+  if (sensorAddress) {
+    result.sensorAddress = sensorAddress;
+  }
+  if (publicKey) {
+    result.publicKey = publicKey;
+  }
+  if (typeof enabled === 'boolean') {
+    result.enabled = enabled;
+  }
+  return result;
 }
 
 function findStringByKey(value: unknown, keys: readonly string[]): string | undefined {
@@ -184,7 +295,11 @@ function findStringByKey(value: unknown, keys: readonly string[]): string | unde
     }
 
     for (const [candidateKey, candidateValue] of Object.entries(objectValue)) {
-      if (candidateKey.toLowerCase() === key.toLowerCase() && typeof candidateValue === 'string' && candidateValue.trim()) {
+      if (
+        candidateKey.toLowerCase() === key.toLowerCase() &&
+        typeof candidateValue === 'string' &&
+        candidateValue.trim()
+      ) {
         return candidateValue;
       }
     }
@@ -215,11 +330,7 @@ function inferEnabled(value: unknown): boolean | undefined {
   }
 
   const objectValue = value as Record<string, unknown>;
-
-  const enabledValue =
-    objectValue.enabled ??
-    objectValue.isEnabled ??
-    objectValue.active;
+  const enabledValue = objectValue.enabled ?? objectValue.isEnabled ?? objectValue.active;
 
   if (typeof enabledValue === 'boolean') {
     return enabledValue;
@@ -238,4 +349,28 @@ function inferEnabled(value: unknown): boolean | undefined {
   }
 
   return undefined;
+}
+
+interface HeaderLike {
+  number: {
+    toNumber(): number;
+  };
+  hash: unknown;
+}
+
+interface EventRecordLike {
+  event: {
+    section?: unknown;
+    method?: unknown;
+    data: {
+      toJSON?: () => unknown;
+      toHuman?: () => unknown;
+    };
+  };
+  phase: {
+    isApplyExtrinsic: boolean;
+    asApplyExtrinsic: {
+      toNumber(): number;
+    };
+  };
 }
