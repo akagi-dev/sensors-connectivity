@@ -45,7 +45,7 @@ pnpm dev
 ```text
 packages/contracts         # @scp/contracts shared schemas/types/helpers
 services/authorizer        # POST /v1/telemetry ingress stub
-services/registry-sync     # substrate->redis projection stub
+services/registry-sync     # substrate->redis projection sync service
 services/pubsub-broadcaster
 services/ipfs-publisher
 services/blockchain-anchor # phase-1 CID-only anchoring stub
@@ -64,7 +64,7 @@ pnpm --filter @scp/blockchain-anchor dev
 ## Service overview
 
 - **authorizer**: validates `POST /v1/telemetry`, applies registry/signature checks, returns `202` after Kafka publish ACK (stubbed producer).
-- **registry-sync**: placeholder for finalized registry event sync from Robonomics/substrate into Redis projection.
+- **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
 - **pubsub-broadcaster**: consumes `telemetry.authorized.v1` and publishes to GossipSub (stubbed), commit-after-success flow.
 - **ipfs-publisher**: consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
 - **blockchain-anchor**: consumes `telemetry.ipfs.result.v1`, dedups by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring.
