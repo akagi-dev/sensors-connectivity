@@ -22,27 +22,27 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 
 - Max clock skew policy example: `±300s` (see replay section for details).
 - Nonce replay protection scope: `(sensor_address, nonce)`.
+- Default per-sensor rate limit: `1 request / 10 seconds`.
 - Per-sensor request rate limiting applies; clients MUST handle `429 Too Many Requests`.
 
 ### Required request headers
 
 - `Content-Type: application/json; charset=utf-8`
 - `X-Request-Id: <uuid>` (recommended for tracing; SHOULD be unique per attempt)
-- `X-Sensor-Zone: eu-west|us-east|ap-southeast` (required for global endpoint routing)
 
 ### Optional request headers
 
-- None.
+- `X-Sensor-Zone: eu-west|us-east|ap-southeast`
 
 ### Request body schema (normative)
 
-| Field            | Type                 | Required | Description                                                                                                    |
-| ---------------- | -------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
-| `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                  |
-| `sensor_address` | string               | yes      | Sensor identity used to resolve public key/authorization state.                                                |
-| `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                         |
-| `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).               |
-| `signature`      | string               | yes      | Hex-encoded 64-byte Ed25519 signature (`0x`-prefixed) compatible with Substrate `sp_core::ed25519::Signature`. |
+| Field            | Type                 | Required | Description                                                                                                             |
+| ---------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                           |
+| `sensor_address` | string               | yes      | Sensor identity used to resolve public key/authorization state.                                                         |
+| `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
+| `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                        |
+| `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented hash input. |
 
 ### Minimal request example
 
@@ -60,7 +60,7 @@ X-Sensor-Zone: eu-west
   "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "0000017a",
-  "signature": "0x3ab10c...64-byte-ed25519-signature...9f21"
+  "signature": "Q5cvaM...base64-ed25519-signature...P8="
 }
 ```
 
@@ -83,7 +83,7 @@ X-Sensor-Zone: eu-west
   "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "2a5b7c0d-44d1-4b2c-84a1-df2cb14d1f14",
-  "signature": "0xf2e3a7...64-byte-ed25519-signature...11bc"
+  "signature": "d9j0z2...base64-ed25519-signature...qk="
 }
 ```
 
@@ -105,23 +105,23 @@ X-Sensor-Zone: eu-west
 
 The hash input bytes MUST be built in this exact order:
 
-`canonical_measurements || nonce || sensor_address`
+`canonical_measurements || timestamp || nonce || sensor_address`
 
 Then:
 
 1. `data_hash = SHA-256(hash_input_bytes)`
-2. `signature = Ed25519_sign(sensor_private_key, data_hash)`
-3. Send `signature` as lowercase hex with `0x` prefix (64 bytes total), compatible with Substrate `sp_core::ed25519::Signature`.
+2. `signature = substrate_ed25519_sign(sensor_private_key, data_hash)`
+3. Send `signature` as base64 text of the raw 64-byte Ed25519 signature.
 
 ### Signing pseudocode
 
 ```text
-function signTelemetry(measurements, nonce, sensorAddress, privateKey):
+function signTelemetry(measurements, timestamp, nonce, sensorAddress, privateKey):
   canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
-  bytesToHash = utf8(canonical) + utf8(nonce) + utf8(sensorAddress)
+  bytesToHash = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorAddress)
   digest = sha256(bytesToHash)
   sig = substrate_ed25519_sign(privateKey, digest) // 64-byte signature
-  return "0x" + hex(sig)
+  return base64(sig)
 ```
 
 ### Verification pseudocode
@@ -129,9 +129,9 @@ function signTelemetry(measurements, nonce, sensorAddress, privateKey):
 ```text
 function verifyTelemetry(request, publicKey):
   canonical = canonicalJson(request.measurements)
-  bytesToHash = utf8(canonical) + utf8(request.nonce) + utf8(request.sensor_address)
+  bytesToHash = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_address)
   digest = sha256(bytesToHash)
-  signatureBytes = hex_decode_0x(request.signature)
+  signatureBytes = base64_decode(request.signature)
   return substrate_ed25519_verify(publicKey, digest, signatureBytes)
 ```
 
@@ -141,8 +141,9 @@ function verifyTelemetry(request, publicKey):
 - Different numeric serialization (for example `21.40` vs `21.4`).
 - Non-UTF-8 encoding.
 - Hashing full request JSON instead of required tuple.
+- Omitting `timestamp` from the signed hash input.
 - Trailing spaces/newlines in `nonce` or `sensor_address`.
-- Wrong signature encoding (must be `0x`-prefixed 64-byte hex).
+- Wrong signature encoding (must be base64 of raw 64-byte signature).
 
 ## Replay and timestamp protection
 
@@ -206,13 +207,13 @@ Global ingestion endpoints are required:
 Router behavior:
 
 1. Route by `X-Sensor-Zone` when present and valid.
-2. If header is absent, route by provisioned sensor home zone.
+2. If header is absent, route by sender IP geolocation policy.
 3. Return `307 Temporary Redirect` to the zone endpoint so clients preserve HTTP method and body.
 
 ### Metadata headers (routing/observability)
 
 - Required: `Content-Type`
-- Required for global routing: `X-Sensor-Zone`
+- Optional for routing hints: `X-Sensor-Zone`
 - Recommended: `X-Request-Id`
 
 `X-Request-Id` SHOULD be propagated into Kafka event metadata for cross-system correlation.
