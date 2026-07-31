@@ -18,16 +18,24 @@ Define **sensor integration** boundaries before service implementation:
 ## Sensor request data structure
 `POST /v1/telemetry` request body:
 
-- `event_id` (string, required, UUID/ULID recommended)
-- `observed_at` (RFC3339 UTC timestamp, required)
-- `sequence_number` (integer >= 0, required)
 - `measurements` (object, required)
 - `sensor_address` (string, required)
-- `key_id` (string, required)
 - `timestamp` (RFC3339 UTC timestamp, required)
 - `nonce` (string, required)
-- `body_hash` (string, required, SHA-256 hex)
 - `signature` (string, required, Ed25519 signature)
+
+## Signing sensor data
+Sensors sign a reproducible hash so the backend can verify authenticity independently of JSON formatting.
+
+Canonical hash input is built from the measurements, nonce, and sensor address:
+
+1. Canonicalize `measurements` deterministically (sorted keys, no insignificant whitespace, UTF-8).
+2. Concatenate the canonical fields in fixed order:
+   `canonical_measurements || nonce || sensor_address`.
+3. Compute `data_hash = SHA-256(concatenated_bytes)`.
+4. `signature = Ed25519_sign(sensor_private_key, data_hash)`.
+
+Verification recomputes `data_hash` from the received `measurements`, `nonce`, and `sensor_address`, then checks `signature` against the sensor public key resolved from `sensor_address`. The same canonicalization rules must be used by sensor and backend to keep the hash reproducible.
 
 ## Canonical event envelope (Kafka)
 All telemetry Kafka topics use a common envelope:
@@ -45,11 +53,10 @@ All telemetry Kafka topics use a common envelope:
 ### `telemetry.authorized.v1`
 Payload:
 - `sensor_address` (string, required)
-- `observed_at` (timestamp, required)
-- `sequence_number` (integer, required)
+- `timestamp` (RFC3339 UTC timestamp, required)
+- `nonce` (string, required)
 - `measurements` (object, required)
 - `signature` (string, required, original sensor signature)
-- `attestation` (object, optional)
 
 ### `telemetry.rejected.v1`
 Payload:
@@ -60,13 +67,11 @@ Payload:
 ### `telemetry.ipfs.published.v1`
 Payload:
 - `cid` (string, required)
-- `batch_id` (string, required)
 - `event_count` (integer, required)
-- `merkle_root` (string, optional)
 
-### `telemetry.relay.result.v1`
+### `telemetry.blockchain.result.v1`
 Payload:
-- `target` (string, required, e.g. blockchain relay name)
+- `target` (string, required, e.g. Robonomics blockchain name)
 - `status` (`submitted` | `failed`, required)
 - `cid` (string, optional)
 - `tx_hash` (string, optional)
@@ -89,8 +94,6 @@ Responses:
 
 ### Response body (minimal)
 - `status` (`accepted` | `rejected`)
-- `event_id` (echo)
-- `trace_id` (optional)
 - `error_code` (for non-202 responses)
 
 ## Validation and compatibility rules
@@ -103,13 +106,13 @@ Responses:
 - Retries: bounded retry policy for transient failures.
 - DLQ: route exhausted failures to `telemetry.dlq.v1`.
 - Idempotency keys:
-  - ingest path: `event_id` + `nonce`
-  - IPFS path: `batch_id`
-  - relay path: `cid` (and optional `delivery_id`)
+  - ingest path: `sensor_address` + `nonce`
+  - IPFS path: `cid`
+  - blockchain path: `cid`
 
 ## Implementation checklist
 - [ ] Freeze JSON schemas for all `telemetry.*.v1` contracts listed above.
 - [ ] Add contract validation library shared by producers/consumers.
 - [ ] Publish API/OpenAPI draft for `POST /v1/telemetry`.
 - [ ] Add contract tests for envelope and payload compatibility.
-- [ ] Add replay/idempotency conformance tests for `event_id`, `nonce`, and `cid`.
+- [ ] Add replay/idempotency conformance tests for `sensor_address`, `nonce`, and `cid`.
