@@ -8,7 +8,7 @@ WP-05 anchors IPFS CIDs into the substrate-based Robonomics blockchain as the fi
 - WP-04
 
 ## Scope / Goal
-Implement `blockchain-anchor` to consume `telemetry.ipfs.published.v1`, submit CID-only anchoring transactions to Robonomics, emit `telemetry.blockchain.result.v1`, and commit offsets only after submission confirmation and result emission.
+Implement `blockchain-anchor` to consume `telemetry.ipfs.result.v1`, submit CID-only anchoring transactions to Robonomics, emit `telemetry.blockchain.result.v1`, and commit offsets only after submission confirmation and result emission.
 
 ## Out of scope / Deferred
 - Advanced finality/reorg handling.
@@ -18,7 +18,7 @@ Implement `blockchain-anchor` to consume `telemetry.ipfs.published.v1`, submit C
 
 ## Inputs & Outputs
 ### Inputs
-- Kafka topic consumed: `telemetry.ipfs.published.v1` payload fields:
+- Kafka topic consumed: `telemetry.ipfs.result.v1` payload fields:
   - `cid`
   - `event_count`
 - Shared envelope/contracts from WP-00.
@@ -35,7 +35,7 @@ Implement `blockchain-anchor` to consume `telemetry.ipfs.published.v1`, submit C
   - `error_message`
 
 ## Detailed tasks / Implementation checklist
-- [ ] Replace service stubs/TODOs with a real consumer for `telemetry.ipfs.published.v1`.
+- [ ] Replace service stubs/TODOs with a real consumer for `telemetry.ipfs.result.v1`.
 - [ ] Validate consumed events against WP-00 schemas.
 - [ ] Implement CID deduplication guard before blockchain submission.
 - [ ] Implement substrate/Robonomics client submission for CID-only anchoring.
@@ -62,7 +62,7 @@ Implement `blockchain-anchor` to consume `telemetry.ipfs.published.v1`, submit C
   - verify consume → submit → result event → commit order,
   - verify DLQ behavior on exhausted failures.
 - Contract tests:
-  - consumed `telemetry.ipfs.published.v1` and produced `telemetry.blockchain.result.v1` compatibility.
+  - consumed `telemetry.ipfs.result.v1` and produced `telemetry.blockchain.result.v1` compatibility.
 
 ## Definition of Done
 - All `TODO` markers in `blockchain-anchor` are replaced with real logic.

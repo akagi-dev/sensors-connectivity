@@ -57,7 +57,7 @@ export async function startIpfsPublisher(): Promise<void> {
     },
     emitResultEvent: async (event) => ({
       event_id: randomUUID(),
-      event_type: TELEMETRY_TOPICS.IPFS_PUBLISHED,
+      event_type: TELEMETRY_TOPICS.IPFS_RESULT,
       event_version: 'v1',
       occurred_at: new Date().toISOString(),
       source: 'ipfs-publisher',
