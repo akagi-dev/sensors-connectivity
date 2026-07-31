@@ -38,7 +38,7 @@ export interface AuthorizerDeps {
 
 export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
-  void app.register(rateLimit, {
+  app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute'
   });
@@ -48,6 +48,12 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
     {
       schema: {
         body: telemetryRequestJsonSchema
+      },
+      config: {
+        rateLimit: {
+          max: 100,
+          timeWindow: '1 minute'
+        }
       }
     },
     async (request, reply) => {
