@@ -12,6 +12,6 @@ export const envelopeSchema = z
     source: z.string().min(1),
     payload: z.record(z.unknown())
   })
-  .passthrough();
+  .strict();
 
 export type Envelope = z.infer<typeof envelopeSchema>;
