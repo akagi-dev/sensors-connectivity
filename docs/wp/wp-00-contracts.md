@@ -31,14 +31,14 @@ Deliver a production-ready `@scp/contracts` package that provides:
   - `telemetry.authorized.v1`
   - `telemetry.rejected.v1`
   - `telemetry.pubsub.result.v1`
-  - `telemetry.ipfs.published.v1`
+  - `telemetry.ipfs.result.v1`
   - `telemetry.blockchain.result.v1`
   - `telemetry.retry.v1`
   - `telemetry.dlq.v1`
 - Payload schemas aligned with integration contracts draft for:
   - `telemetry.authorized.v1`
   - `telemetry.rejected.v1`
-  - `telemetry.ipfs.published.v1`
+  - `telemetry.ipfs.result.v1`
   - `telemetry.blockchain.result.v1`
 - Runtime interfaces/helpers used by consumers in later WPs.
 

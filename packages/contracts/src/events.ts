@@ -44,7 +44,7 @@ export const telemetryBlockchainResultPayloadSchema = z
 export const payloadSchemasByEventType = {
   'telemetry.authorized.v1': telemetryAuthorizedPayloadSchema,
   'telemetry.rejected.v1': telemetryRejectedPayloadSchema,
-  'telemetry.ipfs.published.v1': telemetryIpfsPublishedPayloadSchema,
+  'telemetry.ipfs.result.v1': telemetryIpfsPublishedPayloadSchema,
   'telemetry.blockchain.result.v1': telemetryBlockchainResultPayloadSchema
 } as const;
 

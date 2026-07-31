@@ -105,7 +105,7 @@ describe('contracts', () => {
     expect(TELEMETRY_TOPICS.AUTHORIZED).toBe('telemetry.authorized.v1');
     expect(TELEMETRY_TOPICS.REJECTED).toBe('telemetry.rejected.v1');
     expect(TELEMETRY_TOPICS.PUBSUB_RESULT).toBe('telemetry.pubsub.result.v1');
-    expect(TELEMETRY_TOPICS.IPFS_PUBLISHED).toBe('telemetry.ipfs.published.v1');
+    expect(TELEMETRY_TOPICS.IPFS_RESULT).toBe('telemetry.ipfs.result.v1');
     expect(TELEMETRY_TOPICS.BLOCKCHAIN_RESULT).toBe('telemetry.blockchain.result.v1');
     expect(TELEMETRY_TOPICS.RETRY).toBe('telemetry.retry.v1');
     expect(TELEMETRY_TOPICS.DLQ).toBe('telemetry.dlq.v1');

@@ -33,7 +33,7 @@ Robonomics chain -> Registry Sync -> Redis projection
 2. **WP-01** — the authorizer depends on the registry read path.
 3. **WP-02** — enables end-to-end producing onto Kafka.
 4. **WP-03 / WP-04** in parallel — both consume `telemetry.authorized.v1`.
-5. **WP-05** last — consumes `telemetry.ipfs.published.v1` from WP-04.
+5. **WP-05** last — consumes `telemetry.ipfs.result.v1` from WP-04.
 
 ## Definition of done (applies to every WP)
 

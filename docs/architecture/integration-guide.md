@@ -332,7 +332,7 @@ Example:
 | ------------------------------------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `202 Accepted`                       | `telemetry.authorized.v1`                                                                     | Published after successful verification and authorization.        |
 | `4xx` rejection                      | `telemetry.rejected.v1`                                                                       | Rejection reason in event payload (for observability/audit).      |
-| Downstream publish/processing status | `telemetry.pubsub.result.v1`, `telemetry.ipfs.published.v1`, `telemetry.blockchain.result.v1` | Produced by decoupled consumers, not by synchronous API response. |
+| Downstream publish/processing status | `telemetry.pubsub.result.v1`, `telemetry.ipfs.result.v1`, `telemetry.blockchain.result.v1` | Produced by decoupled consumers, not by synchronous API response. |
 
 Recommended event correlation metadata fields:
 

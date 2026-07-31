@@ -14,7 +14,7 @@ import { loadBlockchainAnchorConfig } from './config.js';
 export async function startBlockchainAnchor(): Promise<void> {
   const config = loadBlockchainAnchorConfig();
 
-  // TODO: wire kafkajs consumer group for telemetry.ipfs.published.v1.
+  // TODO: wire kafkajs consumer group for telemetry.ipfs.result.v1.
   const kafka = new Kafka({ clientId: 'blockchain-anchor', brokers: ['localhost:9092'] });
   void kafka;
 
