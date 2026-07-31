@@ -1,12 +1,13 @@
-# Integration Contracts Draft (Define Structures and APIs First)
+# Sensors Integration Draft (Data Structures and APIs First)
 
 ## Status
 Draft for architecture review (integration-first, docs-only).
 
 ## Goal
-Define integration boundaries before service implementation:
-1. Data structures (events and payloads).
-2. API contracts (ingest and result interfaces).
+Define **sensor integration** boundaries before service implementation:
+1. Sensor data structures.
+2. Sensor-facing API contract.
+3. Kafka event structures produced from sensor ingest.
 
 ## Integration principles
 - Kafka is the central integration backbone.
@@ -14,8 +15,22 @@ Define integration boundaries before service implementation:
 - Producers/consumers must preserve idempotency keys.
 - Offsets are committed only after external side effects and result publication.
 
+## Sensor request data structure
+`POST /v1/telemetry` request body:
+
+- `event_id` (string, required, UUID/ULID recommended)
+- `observed_at` (RFC3339 UTC timestamp, required)
+- `sequence_number` (integer >= 0, required)
+- `measurements` (object, required)
+- `sensor_address` (string, required)
+- `key_id` (string, required)
+- `timestamp` (RFC3339 UTC timestamp, required)
+- `nonce` (string, required)
+- `body_hash` (string, required, SHA-256 hex)
+- `signature` (string, required, Ed25519 signature)
+
 ## Canonical event envelope (Kafka)
-All Kafka topics use a common envelope:
+All telemetry Kafka topics use a common envelope:
 
 - `event_id` (string, required)
 - `event_type` (string, required)
@@ -25,7 +40,7 @@ All Kafka topics use a common envelope:
 - `source` (string, required)
 - `payload` (object, required)
 
-## Topic-to-contract mapping
+## Sensor-related topic contracts
 
 ### `telemetry.authorized.v1`
 Payload:
@@ -33,7 +48,7 @@ Payload:
 - `observed_at` (timestamp, required)
 - `sequence_number` (integer, required)
 - `measurements` (object, required)
-- `signature` (string, required)
+- `signature` (string, required, original sensor signature)
 - `attestation` (object, optional)
 
 ### `telemetry.rejected.v1`
@@ -51,21 +66,19 @@ Payload:
 
 ### `telemetry.relay.result.v1`
 Payload:
-- `target` (string, required)
+- `target` (string, required, e.g. blockchain relay name)
 - `status` (`submitted` | `failed`, required)
 - `cid` (string, optional)
 - `tx_hash` (string, optional)
 - `error_code` (string, optional)
 - `error_message` (string, optional)
 
-## API contracts (define first)
+## Sensor API contract (define first)
 
 ### 1) Sensor Ingest API
 `POST /v1/telemetry`
 
-Request body:
-- `event_id`, `observed_at`, `sequence_number`, `measurements`
-- `sensor_address`, `key_id`, `timestamp`, `nonce`, `body_hash`, `signature`
+Request body: see **Sensor request data structure** section.
 
 Responses:
 - `202 Accepted` (only after Kafka ACK on `telemetry.authorized.v1`)
@@ -74,17 +87,11 @@ Responses:
 - `409 Conflict` (replay: duplicate nonce/event)
 - `503 Service Unavailable` (Kafka not available)
 
-### 2) Relay Integration API (internal contract)
-Input source: `telemetry.ipfs.published.v1`  
-Action: submit CID anchor transaction to blockchain  
-Output topic: `telemetry.relay.result.v1`
-
-Minimal rule:
-1. Consume CID message.
-2. Deduplicate by `cid`.
-3. Submit transaction.
-4. Emit result.
-5. Commit offset.
+### Response body (minimal)
+- `status` (`accepted` | `rejected`)
+- `event_id` (echo)
+- `trace_id` (optional)
+- `error_code` (for non-202 responses)
 
 ## Validation and compatibility rules
 - Required fields must be validated at boundaries.
@@ -92,7 +99,7 @@ Minimal rule:
 - Breaking changes require `v2` topic/api version.
 - Time fields must be RFC3339 UTC.
 
-## Error handling and idempotency at integration layer
+## Error handling and idempotency at sensor integration layer
 - Retries: bounded retry policy for transient failures.
 - DLQ: route exhausted failures to `telemetry.dlq.v1`.
 - Idempotency keys:
