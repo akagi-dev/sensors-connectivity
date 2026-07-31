@@ -80,6 +80,7 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
   if (handlers.idempotency) {
     const eventId = handlers.idempotency.getEventId(event);
     if (eventId && (await handlers.idempotency.hasProcessed(eventId))) {
+      if (handlers.retryPolicy && eventIdFromRetryPolicy) await handlers.retryPolicy.store.clearAttempts(eventIdFromRetryPolicy);
       await handlers.commitOffset();
       return 'duplicate';
     }
