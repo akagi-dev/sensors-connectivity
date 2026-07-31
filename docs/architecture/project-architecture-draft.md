@@ -17,6 +17,7 @@ Supporting path for authorization data:
 ## Module responsibilities
 
 ### 1) Sensor
+- Out of scope for this project phase (designed and implemented by third party).
 - Sends telemetry via `POST /v1/telemetry`.
 - Includes signature and anti-replay fields.
 - Retries same payload safely when delivery fails.
