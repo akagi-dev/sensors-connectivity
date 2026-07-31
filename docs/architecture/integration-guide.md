@@ -5,6 +5,7 @@
 This guide defines the wire contract for sensor ingestion through `POST /v1/telemetry`, including signing, replay protection, routing, and response behavior.
 
 It is implementation-oriented and aligned with the architecture baseline in `/docs/architecture/project-architecture.md`:
+
 - The Authorize module verifies requests.
 - `202 Accepted` is returned only after Kafka ACK.
 - Downstream processing is decoupled via Kafka topics (no direct module coupling).
@@ -12,27 +13,36 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 ## `POST /v1/telemetry`
 
 ### Endpoint
+
 - Path: `POST /v1/telemetry`
 - Content type: `application/json; charset=utf-8`
 - Transport: HTTPS (TLS 1.2+)
 
+### Endpoint limits and protection
+
+- Max clock skew policy example: `±300s` (see replay section for details).
+- Nonce replay protection scope: `(sensor_address, nonce)`.
+- Per-sensor request rate limiting applies; clients MUST handle `429 Too Many Requests`.
+
 ### Required request headers
+
 - `Content-Type: application/json; charset=utf-8`
 - `X-Request-Id: <uuid>` (recommended for tracing; SHOULD be unique per attempt)
+- `X-Sensor-Zone: eu-west|us-east|ap-southeast` (required for global endpoint routing)
 
 ### Optional request headers
-- `X-Sensor-Zone: eu-west|us-east|ap-southeast` (recommended for routing observability)
-- `Idempotency-Key: <string>` (optional gateway metadata; does not replace nonce-based replay protection)
+
+- None.
 
 ### Request body schema (normative)
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `measurements` | object | yes | Sensor readings to be signed. |
-| `sensor_address` | string | yes | Sensor identity used to resolve public key/authorization state. |
-| `timestamp` | string (RFC3339 UTC) | yes | Sensor creation time used for skew/replay checks. |
-| `nonce` | string | yes | Unique request nonce for replay protection. |
-| `signature` | string | yes | Base64 Ed25519 signature over canonical hash input. |
+| Field            | Type                 | Required | Description                                                                                                    |
+| ---------------- | -------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                  |
+| `sensor_address` | string               | yes      | Sensor identity used to resolve public key/authorization state.                                                |
+| `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                         |
+| `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).               |
+| `signature`      | string               | yes      | Hex-encoded 64-byte Ed25519 signature (`0x`-prefixed) compatible with Substrate `sp_core::ed25519::Signature`. |
 
 ### Minimal request example
 
@@ -49,8 +59,8 @@ X-Sensor-Zone: eu-west
   },
   "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
   "timestamp": "2026-07-31T14:20:18Z",
-  "nonce": "7f28f0d3-12b5-4f0f-a4a3-0f88f7afdf7c",
-  "signature": "8n29Qw4T...base64...h7g="
+  "nonce": "0000017a",
+  "signature": "0x3ab10c...64-byte-ed25519-signature...9f21"
 }
 ```
 
@@ -73,7 +83,7 @@ X-Sensor-Zone: eu-west
   "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "2a5b7c0d-44d1-4b2c-84a1-df2cb14d1f14",
-  "signature": "KjYy8VZL...base64...0Y0="
+  "signature": "0xf2e3a7...64-byte-ed25519-signature...11bc"
 }
 ```
 
@@ -98,9 +108,10 @@ The hash input bytes MUST be built in this exact order:
 `canonical_measurements || nonce || sensor_address`
 
 Then:
+
 1. `data_hash = SHA-256(hash_input_bytes)`
 2. `signature = Ed25519_sign(sensor_private_key, data_hash)`
-3. Send `signature` as base64 text in request JSON.
+3. Send `signature` as lowercase hex with `0x` prefix (64 bytes total), compatible with Substrate `sp_core::ed25519::Signature`.
 
 ### Signing pseudocode
 
@@ -109,8 +120,8 @@ function signTelemetry(measurements, nonce, sensorAddress, privateKey):
   canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
   bytesToHash = utf8(canonical) + utf8(nonce) + utf8(sensorAddress)
   digest = sha256(bytesToHash)
-  sig = ed25519_sign(privateKey, digest)
-  return base64(sig)
+  sig = substrate_ed25519_sign(privateKey, digest) // 64-byte signature
+  return "0x" + hex(sig)
 ```
 
 ### Verification pseudocode
@@ -120,8 +131,8 @@ function verifyTelemetry(request, publicKey):
   canonical = canonicalJson(request.measurements)
   bytesToHash = utf8(canonical) + utf8(request.nonce) + utf8(request.sensor_address)
   digest = sha256(bytesToHash)
-  signatureBytes = base64_decode(request.signature)
-  return ed25519_verify(publicKey, digest, signatureBytes)
+  signatureBytes = hex_decode_0x(request.signature)
+  return substrate_ed25519_verify(publicKey, digest, signatureBytes)
 ```
 
 ### Common pitfalls (signature mismatch)
@@ -131,7 +142,7 @@ function verifyTelemetry(request, publicKey):
 - Non-UTF-8 encoding.
 - Hashing full request JSON instead of required tuple.
 - Trailing spaces/newlines in `nonce` or `sensor_address`.
-- Using URL-safe base64 on one side and standard base64 on the other.
+- Wrong signature encoding (must be `0x`-prefixed 64-byte hex).
 
 ## Replay and timestamp protection
 
@@ -157,20 +168,23 @@ function verifyTelemetry(request, publicKey):
 Zone-aware ingestion reduces latency and contains regional failures.
 
 ### Supported zones
+
 - `eu-west`
 - `us-east`
 - `ap-southeast`
 
 ### Endpoint matrix
 
-| Environment | Zone | Base URL |
-|---|---|---|
-| production | eu-west | `https://eu-west.ingest.sensors.social` |
-| production | us-east | `https://us-east.ingest.sensors.social` |
-| production | ap-southeast | `https://ap-southeast.ingest.sensors.social` |
-| staging | eu-west | `https://eu-west.ingest.staging.sensors.social` |
-| staging | us-east | `https://us-east.ingest.staging.sensors.social` |
-| staging | ap-southeast | `https://ap-southeast.ingest.staging.sensors.social` |
+| Environment | Zone          | Base URL                                             |
+| ----------- | ------------- | ---------------------------------------------------- |
+| production  | eu-west       | `https://eu-west.ingest.sensors.social`              |
+| production  | us-east       | `https://us-east.ingest.sensors.social`              |
+| production  | ap-southeast  | `https://ap-southeast.ingest.sensors.social`         |
+| production  | global router | `https://ingest.sensors.social`                      |
+| staging     | eu-west       | `https://eu-west.ingest.staging.sensors.social`      |
+| staging     | us-east       | `https://us-east.ingest.staging.sensors.social`      |
+| staging     | ap-southeast  | `https://ap-southeast.ingest.staging.sensors.social` |
+| staging     | global router | `https://ingest.staging.sensors.social`              |
 
 Primary path in every zone: `POST /v1/telemetry`.
 
@@ -182,17 +196,24 @@ Primary path in every zone: `POST /v1/telemetry`.
 4. During retries/failover, sensor MUST preserve the exact same `nonce` and payload bytes to keep signatures and replay behavior correct.
 5. Backend replay enforcement remains scoped to `(sensor_address, nonce)` and should be synchronized across zones with bounded replication lag.
 
-### Optional global endpoint behavior
+### Global endpoint behavior (required)
 
-A global endpoint MAY exist (`https://ingest.sensors.social/v1/telemetry`).
+Global ingestion endpoints are required:
 
-If used, it SHOULD return `307 Temporary Redirect` to a zone endpoint so clients preserve HTTP method and body on redirect.
+- Production: `https://ingest.sensors.social/v1/telemetry`
+- Staging: `https://ingest.staging.sensors.social/v1/telemetry`
+
+Router behavior:
+
+1. Route by `X-Sensor-Zone` when present and valid.
+2. If header is absent, route by provisioned sensor home zone.
+3. Return `307 Temporary Redirect` to the zone endpoint so clients preserve HTTP method and body.
 
 ### Metadata headers (routing/observability)
 
 - Required: `Content-Type`
-- Recommended: `X-Request-Id`, `X-Sensor-Zone`
-- Optional: `Idempotency-Key`
+- Required for global routing: `X-Sensor-Zone`
+- Recommended: `X-Request-Id`
 
 `X-Request-Id` SHOULD be propagated into Kafka event metadata for cross-system correlation.
 
@@ -304,13 +325,14 @@ Example:
 
 ## Appendix: HTTP-to-Kafka outcome mapping
 
-| HTTP outcome | Kafka topic | Notes |
-|---|---|---|
-| `202 Accepted` | `telemetry.authorized.v1` | Published after successful verification and authorization. |
-| `4xx` rejection | `telemetry.rejected.v1` | Rejection reason in event payload (for observability/audit). |
+| HTTP outcome                         | Kafka topic                                                                                   | Notes                                                             |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `202 Accepted`                       | `telemetry.authorized.v1`                                                                     | Published after successful verification and authorization.        |
+| `4xx` rejection                      | `telemetry.rejected.v1`                                                                       | Rejection reason in event payload (for observability/audit).      |
 | Downstream publish/processing status | `telemetry.pubsub.result.v1`, `telemetry.ipfs.published.v1`, `telemetry.blockchain.result.v1` | Produced by decoupled consumers, not by synchronous API response. |
 
 Recommended event correlation metadata fields:
+
 - `event_id`
 - `sensor_address`
 - `request_id`
