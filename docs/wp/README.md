@@ -5,8 +5,8 @@ Each WP takes a scaffold/stub service to a working, tested implementation.
 
 ## Source of truth
 
-- [`../architecture/project-architecture-draft.md`](../architecture/project-architecture-draft.md)
-- [`../architecture/integration-contracts-draft.md`](../architecture/integration-contracts-draft.md)
+- [`../architecture/project-architecture.md`](../architecture/project-architecture.md)
+- [`../architecture/integration-guide.md`](../architecture/integration-guide.md)
 
 ## Pipeline
 
