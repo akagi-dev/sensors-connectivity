@@ -28,11 +28,11 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 ### Required request headers
 
 - `Content-Type: application/json; charset=utf-8`
-- `X-Request-Id: <uuid>` (recommended for tracing; SHOULD be unique per attempt)
 
 ### Optional request headers
 
-- `X-Sensor-Zone: eu-west|us-east|ap-southeast`
+- `X-Sensor-Zone: ru|eu-west|us-east|ap-southeast` (recommended for routing)
+- `X-Request-Id: <uuid>` (recommended for tracing)
 
 ### Request body schema (normative)
 
@@ -168,6 +168,7 @@ Zone-aware ingestion reduces latency and contains regional failures.
 
 ### Supported zones
 
+- `ru`
 - `eu-west`
 - `us-east`
 - `ap-southeast`
@@ -176,14 +177,16 @@ Zone-aware ingestion reduces latency and contains regional failures.
 
 | Environment | Zone          | Base URL                                             |
 | ----------- | ------------- | ---------------------------------------------------- |
+| production  | global        | `https://ingest.sensors.social`                      |
+| production  | ru            | `https://ru.ingest.sensors.social`                   |
 | production  | eu-west       | `https://eu-west.ingest.sensors.social`              |
 | production  | us-east       | `https://us-east.ingest.sensors.social`              |
 | production  | ap-southeast  | `https://ap-southeast.ingest.sensors.social`         |
-| production  | global router | `https://ingest.sensors.social`                      |
+| staging     | global        | `https://ingest.staging.sensors.social`              |
+| staging     | ru            | `https://ru.ingest.staging.sensors.social`           |
 | staging     | eu-west       | `https://eu-west.ingest.staging.sensors.social`      |
 | staging     | us-east       | `https://us-east.ingest.staging.sensors.social`      |
 | staging     | ap-southeast  | `https://ap-southeast.ingest.staging.sensors.social` |
-| staging     | global router | `https://ingest.staging.sensors.social`              |
 
 Primary path in every zone: `POST /v1/telemetry`.
 
@@ -195,9 +198,9 @@ Primary path in every zone: `POST /v1/telemetry`.
 4. During retries/failover, sensor MUST preserve the exact same `nonce` and payload bytes to keep signatures and replay behavior correct.
 5. Backend replay enforcement remains scoped to `(sensor_address, nonce)` and should be synchronized across zones with bounded replication lag.
 
-### Global endpoint behavior (required)
+### Global endpoint behavior
 
-Global ingestion endpoints are required:
+Global ingestion endpoints:
 
 - Production: `https://ingest.sensors.social/v1/telemetry`
 - Staging: `https://ingest.staging.sensors.social/v1/telemetry`
@@ -212,7 +215,7 @@ Router behavior:
 
 - Required: `Content-Type`
 - Optional for routing hints: `X-Sensor-Zone`
-- Recommended: `X-Request-Id`
+- Recommended for tracing: `X-Request-Id`
 
 `X-Request-Id` SHOULD be propagated into Kafka event metadata for cross-system correlation.
 
