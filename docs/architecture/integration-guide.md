@@ -42,7 +42,7 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 | `sensor_address` | string               | yes      | Sensor identity used to resolve public key/authorization state.                                                         |
 | `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
 | `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                        |
-| `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented hash input. |
+| `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented message bytes. |
 
 ### Minimal request example
 
@@ -101,16 +101,16 @@ X-Sensor-Zone: eu-west
 6. Numbers use a deterministic JSON numeric form (no `+`, no leading zeros, no locale formatting).
 7. Booleans and `null` use JSON literals.
 
-### Hash input concatenation order
+### Message input concatenation order
 
-The hash input bytes MUST be built in this exact order:
+The message bytes to sign MUST be built in this exact order:
 
 `canonical_measurements || timestamp || nonce || sensor_address`
 
 Then:
 
-1. `data_hash = SHA-256(hash_input_bytes)`
-2. `signature = substrate_ed25519_sign(sensor_private_key, data_hash)`
+1. `message` is the byte sequence from the concatenation rule above.
+2. `signature = substrate_ed25519_sign(sensor_private_key, message)`
 3. Send `signature` as base64 text of the raw 64-byte Ed25519 signature.
 
 ### Signing pseudocode
@@ -118,9 +118,8 @@ Then:
 ```text
 function signTelemetry(measurements, timestamp, nonce, sensorAddress, privateKey):
   canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
-  bytesToHash = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorAddress)
-  digest = sha256(bytesToHash)
-  sig = substrate_ed25519_sign(privateKey, digest) // 64-byte signature
+  message = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorAddress)
+  sig = substrate_ed25519_sign(privateKey, message) // 64-byte signature
   return base64(sig)
 ```
 
@@ -129,10 +128,9 @@ function signTelemetry(measurements, timestamp, nonce, sensorAddress, privateKey
 ```text
 function verifyTelemetry(request, publicKey):
   canonical = canonicalJson(request.measurements)
-  bytesToHash = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_address)
-  digest = sha256(bytesToHash)
+  message = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_address)
   signatureBytes = base64_decode(request.signature)
-  return substrate_ed25519_verify(publicKey, digest, signatureBytes)
+  return substrate_ed25519_verify(publicKey, message, signatureBytes)
 ```
 
 ### Common pitfalls (signature mismatch)
@@ -140,8 +138,8 @@ function verifyTelemetry(request, publicKey):
 - Key order differs between signer and verifier.
 - Different numeric serialization (for example `21.40` vs `21.4`).
 - Non-UTF-8 encoding.
-- Hashing full request JSON instead of required tuple.
-- Omitting `timestamp` from the signed hash input.
+- Hashing externally before signing/verifying instead of passing message bytes directly to the Substrate-compatible Ed25519 library.
+- Omitting `timestamp` from the signed message input.
 - Trailing spaces/newlines in `nonce` or `sensor_address`.
 - Wrong signature encoding (must be base64 of raw 64-byte signature).
 
