@@ -39,7 +39,7 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 | Field            | Type                 | Required | Description                                                                                                             |
 | ---------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                           |
-| `sensor_address` | string               | yes      | Sensor identity used to resolve public key/authorization state.                                                         |
+| `sensor_address` | string               | yes      | Robonomics SS58 sensor identity used to resolve public key/authorization state.                                         |
 | `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
 | `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                        |
 | `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented message bytes. |
@@ -57,7 +57,7 @@ X-Sensor-Zone: eu-west
   "measurements": {
     "temperature_c": 21.4
   },
-  "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
+  "sensor_address": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "0000017a",
   "signature": "Q5cvaM...base64-ed25519-signature...P8="
@@ -80,7 +80,7 @@ X-Sensor-Zone: eu-west
     },
     "tags": ["indoor", "lab-2"]
   },
-  "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
+  "sensor_address": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "2a5b7c0d-44d1-4b2c-84a1-df2cb14d1f14",
   "signature": "d9j0z2...base64-ed25519-signature...qk="
@@ -138,6 +138,7 @@ function verifyTelemetry(request, publicKey):
 - Key order differs between signer and verifier.
 - Different numeric serialization (for example `21.40` vs `21.4`).
 - Non-UTF-8 encoding.
+- Address is not encoded as Robonomics Network address (general substrate encoding).
 - Hashing externally before signing/verifying instead of passing message bytes directly to the Substrate-compatible Ed25519 library.
 - Omitting `timestamp` from the signed message input.
 - Trailing spaces/newlines in `nonce` or `sensor_address`.
