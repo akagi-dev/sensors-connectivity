@@ -138,9 +138,6 @@ export function normalizeRegistryEvents(
       if (entry.sensorAddress) {
         candidate.sensorAddress = entry.sensorAddress;
       }
-      if (entry.publicKey) {
-        candidate.publicKey = entry.publicKey;
-      }
       if (typeof entry.enabled === 'boolean') {
         candidate.enabled = entry.enabled;
       }
@@ -213,12 +210,11 @@ function safeToJson(data: { toJSON?: () => unknown; toHuman?: () => unknown }): 
 function extractRegistryEntries(
   raw: unknown,
   normalizedIdentity: string
-): Array<{ sensorAddress?: string; publicKey?: string; enabled?: boolean }> {
+): Array<{ sensorAddress?: string; enabled?: boolean }> {
   if (normalizedIdentity === 'rws.newdevices' || normalizedIdentity === 'rws.set_devices') {
     const addresses = extractDeviceAddresses(raw);
     return addresses.map((address) => ({
       sensorAddress: address,
-      publicKey: address,
       enabled: true
     }));
   }
@@ -257,23 +253,16 @@ function extractDeviceAddresses(raw: unknown): string[] {
 
 function extractRegistryFields(raw: unknown): {
   sensorAddress?: string;
-  publicKey?: string;
   enabled?: boolean;
 } {
   const sensorAddress =
     findStringByKey(raw, ['sensorAddress', 'sensor_address', 'sensor', 'device', 'account']) ??
     findStringByPosition(raw, 0);
-  const publicKey =
-    findStringByKey(raw, ['publicKey', 'public_key', 'pubKey', 'key']) ??
-    findStringByPosition(raw, 1);
   const enabled = inferEnabled(raw);
 
-  const result: { sensorAddress?: string; publicKey?: string; enabled?: boolean } = {};
+  const result: { sensorAddress?: string; enabled?: boolean } = {};
   if (sensorAddress) {
     result.sensorAddress = sensorAddress;
-  }
-  if (publicKey) {
-    result.publicKey = publicKey;
   }
   if (typeof enabled === 'boolean') {
     result.enabled = enabled;

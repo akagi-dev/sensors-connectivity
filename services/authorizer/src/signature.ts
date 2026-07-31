@@ -7,7 +7,7 @@ export interface SignatureVerificationInput {
   nonce: string;
   sensorAddress: string;
   signature: string;
-  publicKey: string;
+  signerAddress: string;
 }
 
 function bytesFromUtf8(input: string): Uint8Array {
@@ -31,13 +31,13 @@ export async function verifyTelemetrySignature(
     .digest('hex');
 
   // Documented verification path: canonicalize -> concat -> SHA-256 -> Ed25519 verify.
-  if (input.publicKey.startsWith('TODO_')) {
+  if (input.signerAddress.startsWith('TODO_')) {
     return false;
   }
 
   return verify(
     bytesFromHex(input.signature),
     bytesFromHex(dataHashHex),
-    bytesFromHex(input.publicKey)
+    bytesFromHex(input.signerAddress)
   );
 }

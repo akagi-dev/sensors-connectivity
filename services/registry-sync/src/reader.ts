@@ -5,7 +5,6 @@ import { RedisProjectionStore, type RedisLike } from './projection-store.js';
 
 export interface SensorRegistryRecord {
   sensorAddress: string;
-  publicKey: string;
   enabled: boolean;
 }
 
@@ -57,7 +56,6 @@ export class RedisRegistryReader implements RegistryReader {
 
     return {
       sensorAddress: record.sensorAddress,
-      publicKey: record.publicKey,
       enabled: record.enabled
     };
   }

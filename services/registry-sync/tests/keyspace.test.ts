@@ -5,7 +5,6 @@ describe('keyspace and mapping', () => {
   it('computes normalized redis keys', () => {
     const keys = createRedisKeyspace('registry-sync:v1');
     expect(keys.sensorState('sensor-1')).toBe('registry-sync:v1:sensor:sensor-1');
-    expect(keys.keyState('pk-1')).toBe('registry-sync:v1:key:pk-1');
     expect(keys.nonceState('sensor-1', 'nonce-1')).toBe('registry-sync:v1:nonce:sensor-1:nonce-1');
     expect(keys.cursorHeight).toBe('registry-sync:v1:cursor:finalized-height');
   });
@@ -16,8 +15,7 @@ describe('keyspace and mapping', () => {
       eventIndex: 2,
       section: 'registry',
       method: 'AuthorizationCreated',
-      sensorAddress: 'sensor-1',
-      publicKey: 'pk-1'
+      sensorAddress: 'sensor-1'
     });
 
     const disabled = mapRegistryEventToUpdate({
@@ -25,12 +23,11 @@ describe('keyspace and mapping', () => {
       eventIndex: 0,
       section: 'registry',
       method: 'AuthorizationDisabled',
-      sensorAddress: 'sensor-1',
-      publicKey: 'pk-1'
+      sensorAddress: 'sensor-1'
     });
 
-    expect(created).toEqual({ sensorAddress: 'sensor-1', publicKey: 'pk-1', enabled: true });
-    expect(disabled).toEqual({ sensorAddress: 'sensor-1', publicKey: 'pk-1', enabled: false });
+    expect(created).toEqual({ sensorAddress: 'sensor-1', enabled: true });
+    expect(disabled).toEqual({ sensorAddress: 'sensor-1', enabled: false });
   });
 
   it('maps rws.NewDevices addresses as eligible records', () => {
@@ -44,7 +41,6 @@ describe('keyspace and mapping', () => {
 
     expect(projected).toEqual({
       sensorAddress: 'sensor-eligible',
-      publicKey: 'sensor-eligible',
       enabled: true
     });
   });

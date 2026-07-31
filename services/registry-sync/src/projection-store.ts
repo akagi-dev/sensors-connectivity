@@ -53,15 +53,6 @@ export class RedisProjectionStore {
   ): Promise<void> {
     await this.redis.hset(this.keyspace.sensorState(update.sensorAddress), {
       sensor_address: update.sensorAddress,
-      public_key: update.publicKey,
-      enabled: String(update.enabled),
-      updated_at_block: String(context.updatedAtBlock),
-      updated_at_event: context.updatedAtEvent
-    });
-
-    await this.redis.hset(this.keyspace.keyState(update.publicKey), {
-      public_key: update.publicKey,
-      sensor_address: update.sensorAddress,
       enabled: String(update.enabled),
       updated_at_block: String(context.updatedAtBlock),
       updated_at_event: context.updatedAtEvent
@@ -70,13 +61,12 @@ export class RedisProjectionStore {
 
   async readSensor(sensorAddress: string): Promise<RegistryProjectionRecord | null> {
     const entry = await this.redis.hgetall(this.keyspace.sensorState(sensorAddress));
-    if (!entry.sensor_address || !entry.public_key || !entry.enabled) {
+    if (!entry.sensor_address || !entry.enabled) {
       return null;
     }
 
     return {
       sensorAddress: entry.sensor_address,
-      publicKey: entry.public_key,
       enabled: entry.enabled === 'true',
       updatedAtBlock: Number.parseInt(entry.updated_at_block ?? '0', 10) || 0,
       updatedAtEvent: entry.updated_at_event ?? ''

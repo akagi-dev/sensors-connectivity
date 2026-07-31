@@ -10,7 +10,6 @@ describe('authorizer read contract from redis projection', () => {
 
     await redis.hset(keys.sensorState('sensor-1'), {
       sensor_address: 'sensor-1',
-      public_key: 'pk-1',
       enabled: 'true',
       updated_at_block: '100',
       updated_at_event: '100:0'
@@ -21,7 +20,6 @@ describe('authorizer read contract from redis projection', () => {
 
     expect(record).toEqual({
       sensorAddress: 'sensor-1',
-      publicKey: 'pk-1',
       enabled: true
     });
 

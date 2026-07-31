@@ -86,7 +86,7 @@ export function createRegistrySyncService(
         performExternalAction: async (current) => {
           const projection = mapRegistryEventToUpdate(current);
           if (!projection) {
-            throw new Error('Registry event missing sensorAddress/publicKey for projection');
+            throw new Error('Registry event missing sensorAddress for projection');
           }
 
           await projectionStore.applyProjection(projection, {
@@ -102,7 +102,6 @@ export function createRegistrySyncService(
             section: current.section,
             method: current.method,
             sensorAddress: projection.sensorAddress,
-            publicKey: projection.publicKey,
             enabled: projection.enabled
           });
         },

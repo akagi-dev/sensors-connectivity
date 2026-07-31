@@ -28,16 +28,14 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-a',
-        publicKey: 'key-a'
+        sensorAddress: 'sensor-a'
       },
       {
         blockHeight: 200,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-a',
-        publicKey: 'key-a'
+        sensorAddress: 'sensor-a'
       }
     ]);
 
@@ -67,8 +65,7 @@ describe('registry sync service processing', () => {
         eventIndex: 1,
         section: 'registry',
         method: 'AuthorizationUpdated',
-        sensorAddress: 'sensor-b',
-        publicKey: 'key-b'
+        sensorAddress: 'sensor-b'
       }
     ]);
 
@@ -94,16 +91,14 @@ describe('registry sync service processing', () => {
         blockHeight: 202,
         eventIndex: 2,
         section: 'registry',
-        method: 'AuthorizationUpdated',
-        sensorAddress: 'sensor-c'
+        method: 'AuthorizationUpdated'
       },
       {
         blockHeight: 203,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-d',
-        publicKey: 'key-d'
+        sensorAddress: 'sensor-d'
       }
     ]);
 
@@ -133,16 +128,14 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-old',
-        publicKey: 'key-old'
+        sensorAddress: 'sensor-old'
       },
       {
         blockHeight: 300,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-new',
-        publicKey: 'key-new'
+        sensorAddress: 'sensor-new'
       }
     ]);
 

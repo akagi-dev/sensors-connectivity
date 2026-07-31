@@ -11,7 +11,6 @@ describe('normalizeRegistryEvents', () => {
           data: {
             toJSON: () => ({
               sensor_address: 'sensor-1',
-              public_key: 'pk-1',
               enabled: true
             })
           }
@@ -32,11 +31,9 @@ describe('normalizeRegistryEvents', () => {
         section: 'registry',
         method: 'AuthorizationUpdated',
         sensorAddress: 'sensor-1',
-        publicKey: 'pk-1',
         enabled: true,
         rawData: {
           sensor_address: 'sensor-1',
-          public_key: 'pk-1',
           enabled: true
         }
       }

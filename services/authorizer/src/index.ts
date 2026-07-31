@@ -74,7 +74,7 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
         nonce: body.nonce,
         sensorAddress: body.sensor_address,
         signature: body.signature,
-        publicKey: record.publicKey
+        signerAddress: record.sensorAddress
       });
 
       if (!signatureValid) {

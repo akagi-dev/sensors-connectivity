@@ -1,6 +1,5 @@
 export interface RegistryProjectionRecord {
   sensorAddress: string;
-  publicKey: string;
   enabled: boolean;
   updatedAtBlock: number;
   updatedAtEvent: string;
@@ -12,20 +11,17 @@ export interface RegistryEvent {
   section: string;
   method: string;
   sensorAddress?: string;
-  publicKey?: string;
   enabled?: boolean;
   rawData?: unknown;
 }
 
 export interface ProjectionUpdate {
   sensorAddress: string;
-  publicKey: string;
   enabled: boolean;
 }
 
 export interface RedisKeyspace {
   sensorState: (sensorAddress: string) => string;
-  keyState: (publicKey: string) => string;
   nonceState: (sensorAddress: string, nonce: string) => string;
   processedEvents: string;
   cursorHeight: string;
@@ -36,7 +32,6 @@ export interface RedisKeyspace {
 export function createRedisKeyspace(prefix: string): RedisKeyspace {
   return {
     sensorState: (sensorAddress: string) => `${prefix}:sensor:${sensorAddress}`,
-    keyState: (publicKey: string) => `${prefix}:key:${publicKey}`,
     nonceState: (sensorAddress: string, nonce: string) => `${prefix}:nonce:${sensorAddress}:${nonce}`,
     processedEvents: `${prefix}:events:processed`,
     cursorHeight: `${prefix}:cursor:finalized-height`,
@@ -51,16 +46,11 @@ export function toChainEventId(event: Pick<RegistryEvent, 'blockHeight' | 'event
 
 export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate | null {
   const sensorAddress = event.sensorAddress?.trim();
-  const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
-  const publicKey =
-    event.publicKey?.trim() ??
-    (normalizedMethod === 'rws.set_devices' || normalizedMethod === 'rws.newdevices'
-      ? sensorAddress
-      : undefined);
-  if (!sensorAddress || !publicKey) {
+  if (!sensorAddress) {
     return null;
   }
 
+  const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
   const explicitEnabled = event.enabled;
   const impliedDisabled =
     normalizedMethod.includes('disable') ||
@@ -79,7 +69,6 @@ export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate
 
   return {
     sensorAddress,
-    publicKey,
     enabled
   };
 }

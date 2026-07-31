@@ -38,16 +38,14 @@ describe.runIf(runRedisIntegration)('registry-sync redis integration', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-int',
-        publicKey: 'key-int'
+        sensorAddress: 'sensor-int'
       },
       {
         blockHeight: 402,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationDisabled',
-        sensorAddress: 'sensor-int',
-        publicKey: 'key-int'
+        sensorAddress: 'sensor-int'
       }
     ]);
 
@@ -62,10 +60,8 @@ describe.runIf(runRedisIntegration)('registry-sync redis integration', () => {
     await service.stop();
 
     const sensor = await redis.hgetall(keyspace.sensorState('sensor-int'));
-    const keyState = await redis.hgetall(keyspace.keyState('key-int'));
 
     expect(sensor.enabled).toBe('false');
-    expect(keyState.enabled).toBe('false');
     expect(await redis.get(keyspace.cursorHeight)).toBe('402');
 
     await redis.quit();
