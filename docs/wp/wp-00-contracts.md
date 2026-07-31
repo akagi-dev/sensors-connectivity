@@ -21,8 +21,8 @@ Deliver a production-ready `@scp/contracts` package that provides:
 ## Inputs & Outputs
 ### Inputs
 - Source-of-truth documents:
-  - `docs/architecture/project-architecture-draft.md`
-  - `docs/architecture/integration-contracts-draft.md`
+  - `docs/architecture/project-architecture.md`
+  - `docs/architecture/integration-guide.md`
 
 ### Outputs
 - Shared envelope schema using fields:

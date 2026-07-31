@@ -2,8 +2,8 @@
 
 ## Status
 Draft / pre-implementation estimate. **No service code exists yet** — the numbers
-below are derived from the architecture in `project-architecture-draft.md` and
-`integration-contracts-draft.md`, not from measurements. This document will be
+below are derived from the architecture in `project-architecture.md` and
+`integration-guide.md`, not from measurements. This document will be
 **updated with real benchmarks after implementation**.
 
 ## Question
@@ -76,5 +76,5 @@ horizontally thanks to Kafka as the central bus. The real ceiling is driven by
 - [ ] Validate horizontal scaling assumption end-to-end.
 
 ## Related documents
-- Project architecture draft: `docs/architecture/project-architecture-draft.md`
-- Integration contracts draft: `docs/architecture/integration-contracts-draft.md`
+- Project architecture: `docs/architecture/project-architecture.md`
+- Integration guide: `docs/architecture/integration-guide.md`

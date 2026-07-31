@@ -46,7 +46,7 @@ Deliver a working Authorizer ingress path that:
 - [ ] Replace Authorizer stubs/TODOs with real handler implementation for `POST /v1/telemetry`.
 - [ ] Validate required fields, RFC3339 UTC timestamp format, and request size/limits.
 - [ ] Implement deterministic canonicalization for `measurements` and hash/signature verification:
-  - `canonical_measurements || nonce || sensor_address`
+  - `canonical_measurements || timestamp || nonce || sensor_address`
   - `data_hash = SHA-256(...)`
   - verify Ed25519 signature against resolved public key.
 - [ ] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_address` + `nonce`).
