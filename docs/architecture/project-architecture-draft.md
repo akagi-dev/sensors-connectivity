@@ -8,7 +8,11 @@ The system accepts signed weather sensor telemetry, verifies authenticity and au
 
 ## High-level architecture
 
-`Sensor -> Telemetry Authorizer -> Kafka -> {PubSub Broadcaster, IPFS Aggregator, Network Relay}`
+`Sensor -> Telemetry Authorizer -> Kafka -> {PubSub Broadcaster, IPFS Batcher} -> Kafka -> Blockchain`
+
+Relay pipeline (CID anchoring), split into two modules:
+
+`IPFS Batcher -> telemetry.ipfs.published.v1 -> Blockchain`
 
 Supporting path for authorization data:
 
@@ -43,17 +47,19 @@ Supporting path for authorization data:
 - Publishes to libp2p/GossipSub topics.
 - Commits offset only after publish confirmation policy.
 
-### 6) IPFS Aggregator
+### 6) IPFS Batcher
 - Consumes authorized events from Kafka.
 - Batches, produces IPFS object/CAR, publishes CID.
 - Emits `telemetry.ipfs.published.v1`.
 - Commits offset only after publish/pin success policy.
 
-### 7) Network Relay
-- Consumes either authorized events or IPFS-published events (by relay type).
-- Sends data to external networks.
-- Emits delivery result events.
-- **Current minimal phase:** publish the CID into the substrate-based Robonomics blockchain (from `telemetry.ipfs.published.v1`) to make the CID immutable.
+### 7) Blockchain
+- Consumes IPFS-published events (`telemetry.ipfs.published.v1`) from Kafka.
+- Publishes the CID into the substrate-based Robonomics blockchain to make the CID immutable.
+- Deduplicates by `cid` before submission.
+- Emits anchoring result events (`telemetry.relay.result.v1`).
+- Commits offset only after blockchain submission confirmation.
+- **Current minimal phase:** CID-only anchoring; advanced finality/reorg, attestation, and multi-chain support are deferred.
 
 ## Core Kafka topics
 - `telemetry.authorized.v1`
@@ -79,7 +85,7 @@ Supporting path for authorization data:
 - Dedup keys depend on module:
   - `event_id` for event-level operations.
   - `batch_id` for IPFS batch operations.
-  - `delivery_id` or `cid` for relay operations.
+  - `cid` for blockchain anchoring operations.
 
 ## Error handling baseline
 - Bounded retries for transient failures.
@@ -93,10 +99,10 @@ Supporting path for authorization data:
   - Authorizer -> PubSub
   - Authorizer -> IPFS
   - PubSub -> IPFS
-  - IPFS -> Relay
+  - IPFS Batcher -> Blockchain (must flow through Kafka)
 
 ## ADR note: why minimal CID anchoring first
-Decision: deliver the first Network Relay phase as CID-only anchoring, publishing the CID into the substrate-based Robonomics blockchain to make it immutable.  
+Decision: split the relay pipeline into an IPFS Batcher module and a Blockchain module, and deliver the first Blockchain phase as CID-only anchoring, publishing the CID into the substrate-based Robonomics blockchain to make it immutable.  
 Reason: smallest safe slice to validate integration and operations while preserving future extensibility for finality/reorg, attestation, and multi-chain support.
 
 ## Deferred items (not in first implementation phase)
@@ -111,8 +117,8 @@ Reason: smallest safe slice to validate integration and operations while preserv
 - [ ] Implement Telemetry Authorizer MVP with Kafka ACK-gated `202`.
 - [ ] Implement Registry Sync + local projection read path.
 - [ ] Implement PubSub Broadcaster consumer with commit-after-publish policy.
-- [ ] Implement IPFS Aggregator consumer with deterministic batching and CID emission.
-- [ ] Implement Network Relay phase 1 (CID-only anchoring into Robonomics blockchain) with CID dedup.
+- [ ] Implement IPFS Batcher consumer with deterministic batching and CID emission.
+- [ ] Implement Blockchain module phase 1 (CID-only anchoring into Robonomics blockchain) with CID dedup.
 - [ ] Add per-module retry + DLQ and baseline observability.
 - [ ] Add integration tests for end-to-end pipeline behavior.
 
