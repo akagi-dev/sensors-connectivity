@@ -6,7 +6,6 @@ import {
   type TelemetryAuthorizedPayload
 } from '@scp/contracts';
 import { Kafka } from 'kafkajs';
-import { create as createIpfsClient } from 'kubo-rpc-client';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadIpfsPublisherConfig } from './config.js';
@@ -20,9 +19,6 @@ export async function startIpfsPublisher(): Promise<void> {
   const config = loadIpfsPublisherConfig();
   const kafka = new Kafka({ clientId: 'ipfs-publisher', brokers: ['localhost:9092'] });
   void kafka;
-
-  // TODO: wire kubo-rpc-client and pin generated object/CAR.
-  void createIpfsClient;
 
   const batch: AuthorizedBatch = {
     batch_id: `batch-${Date.now()}`,
