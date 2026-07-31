@@ -1,3 +1,4 @@
+import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,10 @@ export interface AuthorizerDeps {
 
 export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
+  void app.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute'
+  });
 
   app.post(
     '/v1/telemetry',
