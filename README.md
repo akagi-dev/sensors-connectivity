@@ -1,9 +1,9 @@
-# sensors-connectivity
+# Sensors.social Connectivity monorepo
 
 TypeScript monorepo scaffold for the telemetry pipeline described in:
 
-- [`docs/architecture/project-architecture-draft.md`](./docs/architecture/project-architecture-draft.md)
-- [`docs/architecture/integration-contracts-draft.md`](./docs/architecture/integration-contracts-draft.md)
+- [`project-architecture-draft.md`](./docs/architecture/project-architecture-draft.md)
+- [`integration-contracts-draft.md`](./docs/architecture/integration-contracts-draft.md)
 
 > This repository is intentionally scaffold-only in this phase. Service implementations are stubs with clear TODO markers.
 
