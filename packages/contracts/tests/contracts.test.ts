@@ -268,6 +268,38 @@ describe('contracts', () => {
     expect(dlqCalls).toEqual([2]);
   });
 
+  it('routes directly to DLQ when retry attempts cannot be tracked', async () => {
+    const calls: string[] = [];
+    const status = await runConsumerProcessingRule(
+      { event_id: undefined },
+      {
+        maxRetries: 3,
+        performExternalAction: async () => {
+          throw new Error('transient');
+        },
+        waitForConfirmation: async () => {
+          throw new Error('unreachable');
+        },
+        emitResultEvent: async () => ({ ok: true }),
+        publishResultEvent: async () => {},
+        commitOffset: async () => {
+          calls.push('commit');
+        },
+        retryDlqPublisher: {
+          async publishRetry() {
+            calls.push('retry');
+          },
+          async publishDlq() {
+            calls.push('dlq');
+          }
+        }
+      }
+    );
+
+    expect(status).toBe('dlq');
+    expect(calls).toEqual(['dlq']);
+  });
+
   it('supports event-level idempotency hook by event_id', async () => {
     const calls: string[] = [];
     const status = await runConsumerProcessingRule(

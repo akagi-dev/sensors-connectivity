@@ -117,7 +117,7 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
     const reason = error instanceof Error ? error.message : 'Unknown processing error';
     const attempt = await nextAttempt(eventIdFromRetryPolicy, handlers.retryPolicy);
 
-    if (attempt < maxAttempts) {
+    if (handlers.retryPolicy && eventIdFromRetryPolicy && attempt < maxAttempts) {
       const context: FailureContext = {
         topic: TELEMETRY_TOPICS.RETRY,
         reason,
