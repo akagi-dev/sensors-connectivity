@@ -1,30 +1,317 @@
-# Sensors Integration (Data Structures and APIs)
+# Sensors Integration Guide
 
-## Sensor request data structure
-`POST /v1/telemetry` request body:
+## Purpose and scope
 
-- `measurements` (object, required)
-- `sensor_address` (string, required)
-- `timestamp` (RFC3339 UTC timestamp, required)
-- `nonce` (string, required)
-- `signature` (string, required, Ed25519 signature)
+This guide defines the wire contract for sensor ingestion through `POST /v1/telemetry`, including signing, replay protection, routing, and response behavior.
 
-## Signing sensor data
-Sensors sign a reproducible hash so the backend can verify authenticity independently of JSON formatting.
+It is implementation-oriented and aligned with the architecture baseline in `/docs/architecture/project-architecture.md`:
+- The Authorize module verifies requests.
+- `202 Accepted` is returned only after Kafka ACK.
+- Downstream processing is decoupled via Kafka topics (no direct module coupling).
 
-Canonical hash input is built from the measurements, nonce, and sensor address:
+## `POST /v1/telemetry`
 
-1. Canonicalize `measurements` deterministically (sorted keys, no insignificant whitespace, UTF-8).
-2. Concatenate the canonical fields in fixed order:
-   `canonical_measurements || nonce || sensor_address`.
-3. Compute `data_hash = SHA-256(concatenated_bytes)`.
-4. `signature = Ed25519_sign(sensor_private_key, data_hash)`.
+### Endpoint
+- Path: `POST /v1/telemetry`
+- Content type: `application/json; charset=utf-8`
+- Transport: HTTPS (TLS 1.2+)
 
-Verification recomputes `data_hash` from the received `measurements`, `nonce`, and `sensor_address`, then checks `signature` against the sensor public key resolved from `sensor_address`. The same canonicalization rules must be used by sensor and backend to keep the hash reproducible.
+### Required request headers
+- `Content-Type: application/json; charset=utf-8`
+- `X-Request-Id: <uuid>` (recommended for tracing; SHOULD be unique per attempt)
 
-## Implementation checklist
-- [ ] Freeze JSON schemas for all `telemetry.*.v1` contracts listed above.
-- [ ] Add contract validation library shared by producers/consumers.
-- [ ] Publish API/OpenAPI draft for `POST /v1/telemetry`.
-- [ ] Add contract tests for envelope and payload compatibility.
-- [ ] Add replay/idempotency conformance tests for `sensor_address`, `nonce`, and `cid`.
+### Optional request headers
+- `X-Sensor-Zone: eu-west|us-east|ap-southeast` (recommended for routing observability)
+- `Idempotency-Key: <string>` (optional gateway metadata; does not replace nonce-based replay protection)
+
+### Request body schema (normative)
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `measurements` | object | yes | Sensor readings to be signed. |
+| `sensor_address` | string | yes | Sensor identity used to resolve public key/authorization state. |
+| `timestamp` | string (RFC3339 UTC) | yes | Sensor creation time used for skew/replay checks. |
+| `nonce` | string | yes | Unique request nonce for replay protection. |
+| `signature` | string | yes | Base64 Ed25519 signature over canonical hash input. |
+
+### Minimal request example
+
+```http
+POST /v1/telemetry HTTP/1.1
+Host: eu-west.ingest.sensors.social
+Content-Type: application/json; charset=utf-8
+X-Request-Id: 95ef04de-4de8-409e-b807-156460698514
+X-Sensor-Zone: eu-west
+
+{
+  "measurements": {
+    "temperature_c": 21.4
+  },
+  "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
+  "timestamp": "2026-07-31T14:20:18Z",
+  "nonce": "7f28f0d3-12b5-4f0f-a4a3-0f88f7afdf7c",
+  "signature": "8n29Qw4T...base64...h7g="
+}
+```
+
+### Full request example (multiple measurements)
+
+```json
+{
+  "measurements": {
+    "temperature_c": 21.4,
+    "humidity_pct": 53.2,
+    "pressure_hpa": 1008.7,
+    "pm25_ug_m3": 8.1,
+    "battery_v": 3.78,
+    "location": {
+      "lat": 51.5074,
+      "lon": -0.1278
+    },
+    "tags": ["indoor", "lab-2"]
+  },
+  "sensor_address": "5F3sa2TJAWMqDhXG6jhV4N8ko9V7zj8R8v7q8xM3A1Q2abcd",
+  "timestamp": "2026-07-31T14:20:18Z",
+  "nonce": "2a5b7c0d-44d1-4b2c-84a1-df2cb14d1f14",
+  "signature": "KjYy8VZL...base64...0Y0="
+}
+```
+
+## Signing and verification (normative)
+
+### Canonicalization rules for `measurements`
+
+`measurements` MUST be canonicalized deterministically before hashing.
+
+1. Encode as UTF-8 bytes.
+2. Object keys MUST be sorted lexicographically at every nesting level.
+3. No insignificant whitespace.
+4. Arrays preserve original order (no sorting).
+5. Strings are JSON-escaped deterministically.
+6. Numbers use a deterministic JSON numeric form (no `+`, no leading zeros, no locale formatting).
+7. Booleans and `null` use JSON literals.
+
+### Hash input concatenation order
+
+The hash input bytes MUST be built in this exact order:
+
+`canonical_measurements || nonce || sensor_address`
+
+Then:
+1. `data_hash = SHA-256(hash_input_bytes)`
+2. `signature = Ed25519_sign(sensor_private_key, data_hash)`
+3. Send `signature` as base64 text in request JSON.
+
+### Signing pseudocode
+
+```text
+function signTelemetry(measurements, nonce, sensorAddress, privateKey):
+  canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
+  bytesToHash = utf8(canonical) + utf8(nonce) + utf8(sensorAddress)
+  digest = sha256(bytesToHash)
+  sig = ed25519_sign(privateKey, digest)
+  return base64(sig)
+```
+
+### Verification pseudocode
+
+```text
+function verifyTelemetry(request, publicKey):
+  canonical = canonicalJson(request.measurements)
+  bytesToHash = utf8(canonical) + utf8(request.nonce) + utf8(request.sensor_address)
+  digest = sha256(bytesToHash)
+  signatureBytes = base64_decode(request.signature)
+  return ed25519_verify(publicKey, digest, signatureBytes)
+```
+
+### Common pitfalls (signature mismatch)
+
+- Key order differs between signer and verifier.
+- Different numeric serialization (for example `21.40` vs `21.4`).
+- Non-UTF-8 encoding.
+- Hashing full request JSON instead of required tuple.
+- Trailing spaces/newlines in `nonce` or `sensor_address`.
+- Using URL-safe base64 on one side and standard base64 on the other.
+
+## Replay and timestamp protection
+
+### Timestamp skew policy
+
+- `timestamp` MUST be RFC3339 UTC.
+- Example policy: accept if `abs(server_time - timestamp) <= 300s`.
+- Production value MAY be adjusted by configuration, but MUST be documented and consistent across zones.
+
+### Nonce uniqueness and retention
+
+- Uniqueness scope: `(sensor_address, nonce)`.
+- A nonce accepted once for a sensor MUST be rejected on reuse.
+- Retention guidance: keep nonce records for at least the max timestamp window plus retry horizon (example: `15 minutes`).
+
+### Expected replay/timestamp failures
+
+- Stale or future timestamp outside skew window: reject.
+- Duplicate nonce for same `sensor_address`: reject as replay.
+
+## Regional routing and ingestion endpoints
+
+Zone-aware ingestion reduces latency and contains regional failures.
+
+### Supported zones
+- `eu-west`
+- `us-east`
+- `ap-southeast`
+
+### Endpoint matrix
+
+| Environment | Zone | Base URL |
+|---|---|---|
+| production | eu-west | `https://eu-west.ingest.sensors.social` |
+| production | us-east | `https://us-east.ingest.sensors.social` |
+| production | ap-southeast | `https://ap-southeast.ingest.sensors.social` |
+| staging | eu-west | `https://eu-west.ingest.staging.sensors.social` |
+| staging | us-east | `https://us-east.ingest.staging.sensors.social` |
+| staging | ap-southeast | `https://ap-southeast.ingest.staging.sensors.social` |
+
+Primary path in every zone: `POST /v1/telemetry`.
+
+### Routing policy
+
+1. Sensor SHOULD send to its provisioned home zone.
+2. On timeout/network failure, sensor MAY retry in the same zone first with exponential backoff.
+3. If configured, sensor MAY fail over to another zone.
+4. During retries/failover, sensor MUST preserve the exact same `nonce` and payload bytes to keep signatures and replay behavior correct.
+5. Backend replay enforcement remains scoped to `(sensor_address, nonce)` and should be synchronized across zones with bounded replication lag.
+
+### Optional global endpoint behavior
+
+A global endpoint MAY exist (`https://ingest.sensors.social/v1/telemetry`).
+
+If used, it SHOULD return `307 Temporary Redirect` to a zone endpoint so clients preserve HTTP method and body on redirect.
+
+### Metadata headers (routing/observability)
+
+- Required: `Content-Type`
+- Recommended: `X-Request-Id`, `X-Sensor-Zone`
+- Optional: `Idempotency-Key`
+
+`X-Request-Id` SHOULD be propagated into Kafka event metadata for cross-system correlation.
+
+## Response and error behavior
+
+### Success: `202 Accepted`
+
+`202` means request validation, signature verification, authorization, replay/timestamp checks, and enqueue to Kafka succeeded.
+
+Normative guarantee: response is returned only after Kafka ACK for publish to `telemetry.authorized.v1`.
+
+Example:
+
+```json
+{
+  "status": "accepted",
+  "request_id": "95ef04de-4de8-409e-b807-156460698514",
+  "zone": "eu-west"
+}
+```
+
+### Error format
+
+```json
+{
+  "error": {
+    "code": "invalid_signature",
+    "message": "Signature verification failed",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+### Error examples
+
+#### `401 Unauthorized` — invalid signature
+
+```json
+{
+  "error": {
+    "code": "invalid_signature",
+    "message": "Signature verification failed",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+#### `401 Unauthorized` — stale timestamp
+
+```json
+{
+  "error": {
+    "code": "stale_timestamp",
+    "message": "Timestamp outside allowed skew window",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+#### `409 Conflict` — duplicate nonce (replay)
+
+```json
+{
+  "error": {
+    "code": "duplicate_nonce",
+    "message": "Nonce already used for this sensor",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+#### `400 Bad Request` — schema validation error
+
+```json
+{
+  "error": {
+    "code": "schema_validation_error",
+    "message": "measurements.temperature_c must be a number",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+#### `429 Too Many Requests` — rate limit exceeded
+
+```json
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "message": "Request rate exceeded for sensor",
+    "request_id": "95ef04de-4de8-409e-b807-156460698514",
+    "zone": "eu-west"
+  }
+}
+```
+
+### Retry and backoff guidance for sensor clients
+
+- Retry on network errors/timeouts and `429`.
+- Retry on `5xx` using exponential backoff with jitter.
+- Do not retry `400`/`401`/`409` without changing payload or credentials.
+- Preserve payload, `timestamp`, and `nonce` on retries for a single logical send attempt.
+- Generate a new nonce only when creating a new logical telemetry event.
+
+## Appendix: HTTP-to-Kafka outcome mapping
+
+| HTTP outcome | Kafka topic | Notes |
+|---|---|---|
+| `202 Accepted` | `telemetry.authorized.v1` | Published after successful verification and authorization. |
+| `4xx` rejection | `telemetry.rejected.v1` | Rejection reason in event payload (for observability/audit). |
+| Downstream publish/processing status | `telemetry.pubsub.result.v1`, `telemetry.ipfs.published.v1`, `telemetry.blockchain.result.v1` | Produced by decoupled consumers, not by synchronous API response. |
+
+Recommended event correlation metadata fields:
+- `event_id`
+- `sensor_address`
+- `request_id`
+- `zone`
