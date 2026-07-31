@@ -65,9 +65,8 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
           for (const event of normalized) {
             await onEvent(event);
           }
-        })
-        .catch(() => {
-          return;
+        .catch((error) => {
+          console.error('[registry-sync] failed to process finalized head', error);
         });
     });
   }
