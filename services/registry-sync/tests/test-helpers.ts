@@ -106,11 +106,13 @@ export class FixtureEventSource implements FinalizedRegistryEventSource {
 
   async startFrom(
     fromInclusiveHeight: number,
-    onEvent: (event: RegistryEvent) => Promise<void>
+    onEvent: (event: RegistryEvent) => Promise<void>,
+    onFinalizedHead?: (height: number) => Promise<void> | void
   ): Promise<void> {
     for (const event of this.events) {
       if (event.blockHeight >= fromInclusiveHeight) {
         await onEvent(event);
+        await onFinalizedHead?.(event.blockHeight);
       }
     }
   }

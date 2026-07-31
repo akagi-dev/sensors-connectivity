@@ -185,9 +185,15 @@ export function createRegistrySyncService(
         healthServer = startHealthAndMetricsServer(config.healthPort, metrics);
       }
 
-      await eventSource.startFrom(metrics.syncHeight + 1, async (event) => {
-        await processEvent(event);
-      });
+      await eventSource.startFrom(
+        metrics.syncHeight + 1,
+        async (event) => {
+          await processEvent(event);
+        },
+        (height) => {
+          metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, height);
+        }
+      );
 
       logStructured('registry_sync_started', {
         substrateWsUrl: config.substrateWsUrl,

@@ -27,7 +27,7 @@ describe('normalizeRegistryEvents', () => {
     expect(normalized).toEqual([
       {
         blockHeight: 120,
-        eventIndex: 3,
+        eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationUpdated',
         sensorAddress: 'sensor-1',

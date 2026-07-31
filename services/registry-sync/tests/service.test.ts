@@ -117,6 +117,41 @@ describe('registry sync service processing', () => {
     expect(redis.getList(keys.dlqEvents)).toHaveLength(1);
   });
 
+
+  it('tracks latest finalized head even without registry events', async () => {
+    const redis = new FakeRedis();
+    const source = {
+      async connect() {
+        return;
+      },
+      async disconnect() {
+        return;
+      },
+      async getLatestFinalizedHeight() {
+        return 500;
+      },
+      async startFrom(_fromInclusiveHeight: number, _onEvent: (event: never) => Promise<void>, onFinalizedHead?: (height: number) => Promise<void> | void) {
+        await onFinalizedHead?.(505);
+      },
+      async stop() {
+        return;
+      }
+    };
+
+    const service = createRegistrySyncService({
+      config: testConfig(),
+      redis,
+      eventSource: source,
+      enableHealthServer: false
+    });
+
+    await service.start();
+    await service.stop();
+
+    expect(service.getMetrics().latestFinalizedHeight).toBe(505);
+    expect(service.getMetrics().updateCount).toBe(0);
+  });
+
   it('resumes from persisted cursor on restart', async () => {
     const redis = new FakeRedis();
     const keys = createRedisKeyspace('registry-sync:v1');

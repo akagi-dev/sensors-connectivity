@@ -52,20 +52,25 @@ export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate
 
   const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
   const explicitEnabled = event.enabled;
+  const isRwsEligibility =
+    normalizedMethod === 'rws.set_devices' || normalizedMethod === 'rws.newdevices';
   const impliedDisabled =
     normalizedMethod.includes('disable') ||
     normalizedMethod.includes('revoke') ||
     normalizedMethod.includes('remove');
 
   const impliedEnabled =
+    isRwsEligibility ||
     normalizedMethod.includes('create') ||
     normalizedMethod.includes('update') ||
     normalizedMethod.includes('enable') ||
     normalizedMethod.includes('set');
 
   const enabled =
-    explicitEnabled ??
-    (impliedDisabled ? false : impliedEnabled ? true : true);
+    explicitEnabled ?? (impliedDisabled ? false : impliedEnabled ? true : undefined);
+  if (typeof enabled !== 'boolean') {
+    return null;
+  }
 
   return {
     sensorAddress,

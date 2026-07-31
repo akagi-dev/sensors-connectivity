@@ -45,6 +45,19 @@ describe('keyspace and mapping', () => {
     });
   });
 
+
+  it('returns null when enablement cannot be inferred', () => {
+    const projected = mapRegistryEventToUpdate({
+      blockHeight: 51,
+      eventIndex: 2,
+      section: 'registry',
+      method: 'AuthorizationObserved',
+      sensorAddress: 'sensor-unknown'
+    });
+
+    expect(projected).toBeNull();
+  });
+
   it('uses chain identity as idempotency key', () => {
     expect(toChainEventId({ blockHeight: 42, eventIndex: 7 })).toBe('42:7');
   });

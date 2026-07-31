@@ -7,7 +7,8 @@ export interface FinalizedRegistryEventSource {
   getLatestFinalizedHeight(): Promise<number>;
   startFrom(
     fromInclusiveHeight: number,
-    onEvent: (event: RegistryEvent) => Promise<void>
+    onEvent: (event: RegistryEvent) => Promise<void>,
+    onFinalizedHead?: (height: number) => Promise<void> | void
   ): Promise<void>;
   stop(): Promise<void>;
 }
@@ -43,9 +44,29 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
   async startFrom(
     fromInclusiveHeight: number,
-    onEvent: (event: RegistryEvent) => Promise<void>
+    onEvent: (event: RegistryEvent) => Promise<void>,
+    onFinalizedHead?: (height: number) => Promise<void> | void
   ): Promise<void> {
     const api = this.requireApi();
+
+    const latestFinalizedHash = await api.rpc.chain.getFinalizedHead();
+    const latestFinalizedHeader = await api.rpc.chain.getHeader(latestFinalizedHash);
+    const latestFinalizedHeight = latestFinalizedHeader.number.toNumber();
+
+    for (let height = fromInclusiveHeight; height <= latestFinalizedHeight; height += 1) {
+      const hash = await api.rpc.chain.getBlockHash(height);
+      const eventsQuery = api.query.system?.events;
+      if (!eventsQuery) {
+        continue;
+      }
+
+      const codec = await eventsQuery.at(hash as never);
+      const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
+      for (const event of normalized) {
+        await onEvent(event);
+      }
+      await onFinalizedHead?.(height);
+    }
 
     this.unsubscribe = await api.rpc.chain.subscribeFinalizedHeads((header: HeaderLike) => {
       this.processing = this.processing
@@ -65,6 +86,8 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
           for (const event of normalized) {
             await onEvent(event);
           }
+          await onFinalizedHead?.(height);
+        })
         .catch((error) => {
           console.error('[registry-sync] failed to process finalized head', error);
         });
@@ -103,9 +126,7 @@ export function normalizeRegistryEvents(
       return;
     }
 
-    const eventIndex = record.phase.isApplyExtrinsic
-      ? record.phase.asApplyExtrinsic.toNumber()
-      : fallbackIndex;
+    const eventIndex = fallbackIndex;
 
     const rawData = safeToJson(record.event.data);
     const extractedEntries = extractRegistryEntries(rawData, loweredIdentity);
