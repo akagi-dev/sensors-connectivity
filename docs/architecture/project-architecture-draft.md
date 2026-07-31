@@ -115,5 +115,5 @@ Reason: smallest safe slice to validate integration and operations while preserv
 - [ ] Add per-module retry + DLQ and baseline observability.
 - [ ] Add integration tests for end-to-end pipeline behavior.
 
-## Related document
-- Minimal relay phase detail: `docs/architecture/minimal-cid-blockchain-relay-draft.md`
+## Related documents
+- Integration contracts draft: `docs/architecture/integration-contracts-draft.md`
