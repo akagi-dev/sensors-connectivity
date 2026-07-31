@@ -12,7 +12,7 @@ The system accepts signed weather sensor telemetry, verifies authenticity and au
 
 Supporting path for authorization data:
 
-`Blockchain -> Registry Sync -> Local Registry / Redis -> Telemetry Authorizer`
+`Robonomics blockchain -> Registry Sync -> Local Registry / Redis -> Telemetry Authorizer`
 
 ## Module responsibilities
 
@@ -30,7 +30,7 @@ Supporting path for authorization data:
 - Returns `202` only after Kafka ACK.
 
 ### 3) Registry Sync + Local Registry
-- Consumes finalized blockchain registry events.
+- Consumes finalized Robonomics blockchain registry events.
 - Maintains local projection of sensor/key status.
 - Serves low-latency reads to Authorizer (optionally via Redis cache).
 
@@ -53,7 +53,7 @@ Supporting path for authorization data:
 - Consumes either authorized events or IPFS-published events (by relay type).
 - Sends data to external networks.
 - Emits delivery result events.
-- **Current minimal phase:** CID-only blockchain anchoring from `telemetry.ipfs.published.v1`.
+- **Current minimal phase:** publish the CID into the substrate-based Robonomics blockchain (from `telemetry.ipfs.published.v1`) to make the CID immutable.
 
 ## Core Kafka topics
 - `telemetry.authorized.v1`
@@ -96,7 +96,7 @@ Supporting path for authorization data:
   - IPFS -> Relay
 
 ## ADR note: why minimal CID anchoring first
-Decision: deliver the first Network Relay phase as CID-only blockchain anchoring.  
+Decision: deliver the first Network Relay phase as CID-only anchoring, publishing the CID into the substrate-based Robonomics blockchain to make it immutable.  
 Reason: smallest safe slice to validate integration and operations while preserving future extensibility for finality/reorg, attestation, and multi-chain support.
 
 ## Deferred items (not in first implementation phase)
@@ -112,7 +112,7 @@ Reason: smallest safe slice to validate integration and operations while preserv
 - [ ] Implement Registry Sync + local projection read path.
 - [ ] Implement PubSub Broadcaster consumer with commit-after-publish policy.
 - [ ] Implement IPFS Aggregator consumer with deterministic batching and CID emission.
-- [ ] Implement Network Relay phase 1 (CID-only anchoring) with CID dedup.
+- [ ] Implement Network Relay phase 1 (CID-only anchoring into Robonomics blockchain) with CID dedup.
 - [ ] Add per-module retry + DLQ and baseline observability.
 - [ ] Add integration tests for end-to-end pipeline behavior.
 
