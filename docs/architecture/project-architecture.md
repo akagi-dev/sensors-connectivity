@@ -6,9 +6,9 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 
 ## High-level architecture
 
-`Sensor -> Authorize -> Message Bus (Kafka) -> Services (IPFS, PubSub, Blochain)`
+`Sensor -> Authorizer -> Message Bus (Kafka) -> Services (IPFS, PubSub, Blochain)`
 
-> Authorization source: `Robonomics Blockchain -> Registry Sync -> Redis -> Authorize`
+> Authorization source: `Robonomics Blockchain -> Registry Sync -> Redis -> Authorizer`
 
 ### PubSub Broadcast
 
@@ -26,7 +26,7 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 - Includes signature and anti-replay fields.
 - Retries same payload safely when delivery fails.
 
-### Authorize
+### Authorizer
 - Validates request schema and limits.
 - Verifies hash, timestamp window, nonce, and Ed25519 signature.
 - Checks sensor/key status from local registry projection (no blockchain RPC in hot path).
@@ -36,7 +36,7 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 ### Registry Sync
 - Consumes finalized Robonomics blockchain events.
 - Maintains local projection of sensor/key status.
-- Serves low-latency reads to Authorize module (optionally via Redis cache).
+- Serves low-latency reads to Authorizer module (optionally via Redis cache).
 
 ### Kafka (central bus)
 - Durable event log and decoupling point for all processing modules.
@@ -95,7 +95,7 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 - No synchronous dependency between processing modules.
 - Allowed flow: `Authorizer -> Kafka -> Consumers`.
 - Disallowed direct couplings:
-  - Authorize -> PubSub
-  - Authorize -> IPFS
+  - Authorizer -> PubSub
+  - Authorizer -> IPFS
   - PubSub -> IPFS
   - IPFS -> Blockchain (must flow through Kafka)
