@@ -1,0 +1,28 @@
+{
+  "name": "@scp/authorizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.1.0",
+    "@scp/contracts": "workspace:*",
+    "@scp/registry-sync": "workspace:*",
+    "fastify": "^4.29.1",
+    "json-canonicalize": "^1.1.1",
+    "kafkajs": "^2.2.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.3"
+  }
+}
