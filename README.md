@@ -2,8 +2,8 @@
 
 TypeScript monorepo scaffold for the telemetry pipeline described in:
 
-- [`project-architecture-draft.md`](./docs/architecture/project-architecture-draft.md)
-- [`integration-contracts-draft.md`](./docs/architecture/integration-contracts-draft.md)
+- [`project-architecture.md`](./docs/architecture/project-architecture.md)
+- [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
 > This repository is intentionally scaffold-only in this phase. Service implementations are stubs with clear TODO markers.
 
