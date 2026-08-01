@@ -1,5 +1,8 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
+import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
 import type { RegistryEvent } from './keyspace.js';
+
+const ROBONOMICS_SS58_PREFIX = 32;
 
 export interface FinalizedRegistryEventSource {
   connect(): Promise<void>;
@@ -245,7 +248,9 @@ function extractRegistryEntries(
 
 function extractDeviceAddresses(raw: unknown): string[] {
   if (Array.isArray(raw) && raw.every((value) => typeof value === 'string')) {
-    return raw.filter((value): value is string => value.trim().length > 0);
+    return raw
+      .filter((value): value is string => value.trim().length > 0)
+      .map((value) => normalizeRobonomicsAddress(value));
   }
 
   if (Array.isArray(raw)) {
@@ -270,6 +275,15 @@ function extractDeviceAddresses(raw: unknown): string[] {
   }
 
   return [];
+}
+
+function normalizeRobonomicsAddress(address: string): string {
+  const trimmed = address.trim();
+  try {
+    return encodeAddress(decodeAddress(trimmed), ROBONOMICS_SS58_PREFIX);
+  } catch {
+    return trimmed;
+  }
 }
 
 function extractRegistryFields(raw: unknown): {
