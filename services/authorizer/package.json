@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "fake-sensor": "tsx src/fake-sensor-cli.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.1.0",

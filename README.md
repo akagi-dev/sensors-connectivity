@@ -61,6 +61,33 @@ pnpm --filter @scp/ipfs-publisher dev
 pnpm --filter @scp/blockchain-anchor dev
 ```
 
+## Fake sensor telemetry CLI
+
+Use this helper CLI to post fake telemetry messages for local debugging and integration testing.
+
+Run from repo root:
+
+```bash
+pnpm fake-sensor -- --endpoint http://localhost:3000/v1/telemetry --sensor-id debug-01 --count 5 --interval-ms 1000
+```
+
+Run directly in authorizer workspace:
+
+```bash
+pnpm --filter @scp/authorizer fake-sensor -- --count 3
+```
+
+Available options:
+
+- `--endpoint <url>` (env: `SENSOR_FAKE_ENDPOINT_URL`, default: `http://localhost:3000/v1/telemetry`)
+- `--sensor-id <id>` (env: `SENSOR_FAKE_SENSOR_ID`, default: `debug-sensor-001`)
+- `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
+- `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
+- `--auth-token <token>` (env: `SENSOR_FAKE_AUTH_TOKEN`, optional)
+- `--auth-header <name>` (env: `SENSOR_FAKE_AUTH_HEADER`, default: `authorization`)
+
+The CLI logs each outgoing payload and the HTTP response status. It exits with a non-zero code on invalid options or request failures.
+
 ## Service overview
 
 - **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
