@@ -84,6 +84,30 @@ interface ProcessingContext {
   metrics: PubsubBroadcasterMetrics;
 }
 
+function logInfo(message: string, context?: Record<string, unknown>): void {
+  if (context && Object.keys(context).length > 0) {
+    console.info('[pubsub-broadcaster]', message, context);
+    return;
+  }
+  console.info('[pubsub-broadcaster]', message);
+}
+
+function logWarn(message: string, context?: Record<string, unknown>): void {
+  if (context && Object.keys(context).length > 0) {
+    console.warn('[pubsub-broadcaster]', message, context);
+    return;
+  }
+  console.warn('[pubsub-broadcaster]', message);
+}
+
+function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  const details = {
+    ...(context ?? {}),
+    error: error instanceof Error ? error.message : String(error)
+  };
+  console.error('[pubsub-broadcaster]', message, details);
+}
+
 export async function processAuthorizedEnvelope(
   envelope: AuthorizedTelemetryEnvelope,
   commitOffset: () => Promise<void>,
@@ -212,10 +236,18 @@ export function createPubsubBroadcasterService(
   return {
     async start(): Promise<void> {
       if (started) {
+        logInfo('start skipped; service already started');
         return;
       }
 
       started = true;
+      logInfo('starting service', {
+        consumerGroupId: config.consumerGroupId,
+        kafkaBrokers: config.kafkaBrokers,
+        pubsubTopic: config.pubsubTopic,
+        reservedPeerCount: config.reservedPeers.length,
+        healthPort: config.healthPort
+      });
       try {
         pubsubClient = await createPubsubClient();
         await pubsubClient.start();
@@ -241,7 +273,9 @@ export function createPubsubBroadcasterService(
             });
           }
         });
+        logInfo('service started');
       } catch (error) {
+        logError('service failed to start', error);
         started = false;
         runPromise = null;
 
@@ -260,19 +294,23 @@ export function createPubsubBroadcasterService(
           pubsubClient?.stop() ?? Promise.resolve()
         ]);
         pubsubClient = null;
+        logInfo('startup rollback complete');
         throw error;
       }
     },
     async stop(): Promise<void> {
       if (!started) {
+        logInfo('stop skipped; service not started');
         return;
       }
 
       started = false;
+      logInfo('stopping service');
       await consumer.stop();
       await consumer.disconnect();
       await publisher.disconnect();
       await pubsubClient?.stop();
+      pubsubClient = null;
       if (healthServer) {
         await new Promise<void>((resolve, reject) => {
           healthServer?.close((error) => {
@@ -287,6 +325,7 @@ export function createPubsubBroadcasterService(
       }
       await runPromise?.catch(() => undefined);
       runPromise = null;
+      logInfo('service stopped');
     },
     getMetrics(): Readonly<PubsubBroadcasterMetrics> {
       return metrics;
@@ -308,6 +347,10 @@ interface BatchProcessingDeps {
 async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps): Promise<void> {
   for (const message of payload.batch.messages) {
     if (!payload.isRunning() || payload.isStale()) {
+      logWarn('batch processing halted by consumer state', {
+        topic: payload.batch.topic,
+        partition: payload.batch.partition
+      });
       return;
     }
 
@@ -330,6 +373,12 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
     const raw = message.value?.toString('utf8') ?? '';
     const parsed = safeJsonParse(raw);
     if (!parsed.success) {
+      logWarn('invalid JSON payload routed to DLQ', {
+        topic: payload.batch.topic,
+        partition: payload.batch.partition,
+        offset: message.offset,
+        reason: parsed.error
+      });
       await publishInvalidMessageDlq(raw, parsed.error, deps, commitOffset);
       await payload.heartbeat();
       continue;
@@ -340,18 +389,32 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
       const reason = envelopeResult.success
         ? `Unsupported event type: ${envelopeResult.data.event_type}`
         : envelopeResult.error.message;
+      logWarn('invalid envelope routed to DLQ', {
+        topic: payload.batch.topic,
+        partition: payload.batch.partition,
+        offset: message.offset,
+        reason
+      });
       await publishInvalidMessageDlq(parsed.data, reason, deps, commitOffset);
       await payload.heartbeat();
       continue;
     }
 
-    await processAuthorizedEnvelope(envelopeResult.data as AuthorizedTelemetryEnvelope, commitOffset, {
+    const status = await processAuthorizedEnvelope(envelopeResult.data as AuthorizedTelemetryEnvelope, commitOffset, {
       config: deps.config,
       pubsub: deps.pubsub,
       publisher: deps.publisher,
       idempotencyStore: deps.idempotencyStore,
       retryStore: deps.retryStore,
       metrics: deps.metrics
+    });
+    logInfo('authorized envelope handled', {
+      eventId: envelopeResult.data.event_id,
+      traceId: envelopeResult.data.trace_id,
+      status,
+      topic: payload.batch.topic,
+      partition: payload.batch.partition,
+      offset: message.offset
     });
     await payload.heartbeat();
   }
@@ -554,7 +617,7 @@ async function safeDial(node: Awaited<ReturnType<typeof createLibp2p>>, multiadd
     await (node as unknown as { dial: (target: unknown) => Promise<unknown> }).dial(multiaddr);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown dial error';
-    console.warn('[pubsub-broadcaster] reserved peer dial failed', {
+    logWarn('reserved peer dial failed', {
       peer: multiaddr,
       error: message
     });
