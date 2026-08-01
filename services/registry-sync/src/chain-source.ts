@@ -197,7 +197,7 @@ function isEventRecordLike(value: unknown): value is EventRecordLike {
 }
 
 function looksLikeRegistryEvent(name: string): boolean {
-  if (name === 'rws.newdevices' || name === 'rws.set_devices') {
+  if (name === 'rws.newdevices') {
     return true;
   }
 
@@ -232,7 +232,7 @@ function extractRegistryEntries(
   raw: unknown,
   normalizedIdentity: string
 ): Array<{ sensorAddress?: string; enabled?: boolean }> {
-  if (normalizedIdentity === 'rws.newdevices' || normalizedIdentity === 'rws.set_devices') {
+  if (normalizedIdentity === 'rws.newdevices') {
     const addresses = extractDeviceAddresses(raw);
     return addresses.map((address) => ({
       sensorAddress: address,

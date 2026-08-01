@@ -4,6 +4,7 @@ import type { RegistryProjectionRecord, ProjectionUpdate, RedisKeyspace } from '
 export interface RedisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, mode?: string, duration?: number, flag?: string): Promise<unknown>;
+  eval?(script: string, numkeys: number, ...args: string[]): Promise<unknown>;
   exists(key: string): Promise<number>;
   sadd(key: string, member: string): Promise<number>;
   sismember(key: string, member: string): Promise<number>;
@@ -33,6 +34,25 @@ export class RedisProjectionStore {
   }
 
   async commitCursorHeight(height: number): Promise<void> {
+    if (typeof this.redis.eval === 'function') {
+      const script = `
+local current = redis.call('GET', KEYS[1])
+local next = tonumber(ARGV[1])
+if (current == false) then
+  redis.call('SET', KEYS[1], ARGV[1])
+  return 1
+end
+local currentNumber = tonumber(current)
+if (currentNumber == nil or next > currentNumber) then
+  redis.call('SET', KEYS[1], ARGV[1])
+  return 1
+end
+return 0
+`;
+      await this.redis.eval(script, 1, this.keyspace.cursorHeight, String(height));
+      return;
+    }
+
     const current = await this.loadCursorHeight();
     if (height > current) {
       await this.redis.set(this.keyspace.cursorHeight, String(height));

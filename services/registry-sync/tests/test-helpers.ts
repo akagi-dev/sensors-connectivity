@@ -31,6 +31,26 @@ export class FakeRedis implements RedisLike {
     return 'OK';
   }
 
+  async eval(_script: string, numkeys: number, ...args: string[]): Promise<number> {
+    if (numkeys !== 1 || args.length < 2) {
+      return 0;
+    }
+
+    const [key, rawHeight] = args;
+    if (!key || !rawHeight) {
+      return 0;
+    }
+
+    const next = Number.parseInt(rawHeight, 10);
+    const current = Number.parseInt(this.values.get(key) ?? '', 10);
+    if (!Number.isFinite(current) || next > current) {
+      this.values.set(key, rawHeight);
+      return 1;
+    }
+
+    return 0;
+  }
+
   async exists(key: string): Promise<number> {
     return this.values.has(key) ? 1 : 0;
   }
