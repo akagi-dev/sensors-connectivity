@@ -118,7 +118,7 @@ export function createAuthorizerApp(
           .catch((error) => {
             logError('failed to publish rejected event', error, {
               trace_id: traceId,
-              sensor_address: payload.sensor_address,
+              sensor_id: payload.sensor_id,
               reason_code: payload.reason_code
             });
           });
