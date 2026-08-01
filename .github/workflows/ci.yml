@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  tests:
+  unit-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +24,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
 
-  integration-test:
-    needs: tests
+  e2e:
+    needs: unit-tests
     permissions:
       contents: read
       actions: write
