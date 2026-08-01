@@ -5,8 +5,8 @@ WP-02 implements trusted telemetry ingress at `POST /v1/telemetry`. The service 
 
 ## Current status snapshot
 - Implemented: ingress route scaffold, schema validation, Redis-backed sensor/nonce checks, signature verification path, `401/403/409/503/202` response mapping.
-- Implemented in this increment: ACK-gated Kafka producer send path for `telemetry.authorized.v1`, basic `/health` and `/metrics` endpoints, and signature hash input alignment (`canonical_measurements || timestamp || nonce || sensor_address`).
-- Remaining for full WP-02 DoD: rejection-event publish path (`telemetry.rejected.v1`), timestamp window enforcement, bounded retry/DLQ around producer failures, broader integration coverage.
+- Implemented in this increment: timestamp skew enforcement, rejection-event publish path (`telemetry.rejected.v1`), bounded producer retry with DLQ fallback, and ACK-gated Kafka publish for `telemetry.authorized.v1`.
+- Remaining for full WP-02 DoD: broader docker-compose integration coverage and formal DoD sign-off.
 
 ## Depends on
 - WP-00
@@ -48,24 +48,23 @@ Deliver a working Authorizer ingress path that:
   - `503 Service Unavailable`
 
 ## Detailed tasks / Implementation checklist
-- [ ] Replace Authorizer stubs/TODOs with real handler implementation for `POST /v1/telemetry`.
-- [ ] Validate required fields, RFC3339 UTC timestamp format, and request size/limits.
-- [ ] Implement deterministic canonicalization for `measurements` and hash/signature verification:
+- [x] Replace Authorizer stubs/TODOs with real handler implementation for `POST /v1/telemetry`.
+- [x] Validate required fields, RFC3339 UTC timestamp format, and request size/limits.
+- [x] Implement deterministic canonicalization for `measurements` and signature verification:
   - `canonical_measurements || timestamp || nonce || sensor_address`
-  - `data_hash = SHA-256(...)`
   - verify Ed25519 signature against resolved public key.
-- [ ] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_address` + `nonce`).
-- [ ] Read sensor/key status from Redis projection; reject disabled/unauthorized keys.
-- [ ] Publish accepted requests to `telemetry.authorized.v1` with canonical envelope/payload from WP-00.
-- [ ] Publish rejections to `telemetry.rejected.v1` with reason code/message.
-- [ ] Gate `202` response on Kafka ACK success for `telemetry.authorized.v1` publish.
-- [ ] Map failures to `401/403/409/503` deterministically and return minimal response body (`status`, `error_code`).
-- [ ] Add health/metrics endpoint and structured logging with `event_id`/`trace_id` correlation.
+- [x] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_address` + `nonce`).
+- [x] Read sensor/key status from Redis projection; reject disabled/unauthorized keys.
+- [x] Publish accepted requests to `telemetry.authorized.v1` with canonical envelope/payload from WP-00.
+- [x] Publish rejections to `telemetry.rejected.v1` with reason code/message.
+- [x] Gate `202` response on Kafka ACK success for `telemetry.authorized.v1` publish.
+- [x] Map failures to `401/403/409/503` deterministically and return minimal response body (`status`, `error_code`).
+- [x] Add health/metrics endpoint and structured logging with `event_id`/`trace_id` correlation.
 
 ## Idempotency & error handling
 - Ingest dedup key: `sensor_address` + `nonce`.
 - Duplicate nonce for same sensor must return `409 Conflict`.
-- Signature/hash mismatch must return `401 Unauthorized`.
+- Signature mismatch must return `401 Unauthorized`.
 - Unauthorized/disabled sensor/key status must return `403 Forbidden`.
 - Kafka unavailability/ACK failure must return `503 Service Unavailable`.
 - Rejected-event publication should be best-effort with bounded retry; failures must not incorrectly return `202`.

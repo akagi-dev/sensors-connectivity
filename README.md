@@ -5,7 +5,7 @@ TypeScript monorepo scaffold for the telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> This repository is intentionally scaffold-only in this phase. Service implementations are stubs with clear TODO markers.
+> Current phase: WP-00/WP-01 are implemented and WP-02 (`authorizer`) is fully implemented. WP-03 to WP-05 remain scaffolded.
 
 ## Stack
 
@@ -63,7 +63,7 @@ pnpm --filter @scp/blockchain-anchor dev
 
 ## Service overview
 
-- **authorizer**: validates `POST /v1/telemetry`, applies registry/signature checks, returns `202` after Kafka publish ACK (stubbed producer).
+- **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
 - **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
 - **pubsub-broadcaster**: consumes `telemetry.authorized.v1` and publishes to GossipSub (stubbed), commit-after-success flow.
 - **ipfs-publisher**: consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
