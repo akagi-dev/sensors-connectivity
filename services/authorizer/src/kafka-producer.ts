@@ -120,7 +120,7 @@ export function createAuthorizerEventProducer(
     async publishAuthorized(payload: TelemetryAuthorizedPayload, traceId?: string): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.AUTHORIZED,
-        `${payload.sensor_address}:${payload.nonce}`,
+        `${payload.sensor_id}:${payload.nonce}`,
         payload,
         traceId
       );
@@ -128,7 +128,7 @@ export function createAuthorizerEventProducer(
     async publishRejected(payload: TelemetryRejectedPayload, traceId?: string): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.REJECTED,
-        `${payload.sensor_address ?? 'unknown'}:${payload.reason_code}`,
+        `${payload.sensor_id ?? 'unknown'}:${payload.reason_code}`,
         payload,
         traceId
       );

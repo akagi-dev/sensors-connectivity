@@ -1,5 +1,5 @@
 export interface RegistryProjectionRecord {
-  sensorAddress: string;
+  sensorId: string;
   enabled: boolean;
   updatedAtBlock: number;
   updatedAtEvent: string;
@@ -10,19 +10,19 @@ export interface RegistryEvent {
   eventIndex: number;
   section: string;
   method: string;
-  sensorAddress?: string;
+  sensorId?: string;
   enabled?: boolean;
   rawData?: unknown;
 }
 
 export interface ProjectionUpdate {
-  sensorAddress: string;
+  sensorId: string;
   enabled: boolean;
 }
 
 export interface RedisKeyspace {
-  sensorState: (sensorAddress: string) => string;
-  nonceState: (sensorAddress: string, nonce: string) => string;
+  sensorState: (sensorId: string) => string;
+  nonceState: (sensorId: string, nonce: string) => string;
   processedEvents: string;
   cursorHeight: string;
   dlqEvents: string;
@@ -31,8 +31,8 @@ export interface RedisKeyspace {
 
 export function createRedisKeyspace(prefix: string): RedisKeyspace {
   return {
-    sensorState: (sensorAddress: string) => `${prefix}:sensor:${sensorAddress}`,
-    nonceState: (sensorAddress: string, nonce: string) => `${prefix}:nonce:${sensorAddress}:${nonce}`,
+    sensorState: (sensorId: string) => `${prefix}:sensor:${sensorId}`,
+    nonceState: (sensorId: string, nonce: string) => `${prefix}:nonce:${sensorId}:${nonce}`,
     processedEvents: `${prefix}:events:processed`,
     cursorHeight: `${prefix}:cursor:finalized-height`,
     dlqEvents: `${prefix}:dlq:events`,
@@ -45,8 +45,8 @@ export function toChainEventId(event: Pick<RegistryEvent, 'blockHeight' | 'event
 }
 
 export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate | null {
-  const sensorAddress = event.sensorAddress?.trim();
-  if (!sensorAddress) {
+  const sensorId = event.sensorId?.trim();
+  if (!sensorId) {
     return null;
   }
 
@@ -72,7 +72,7 @@ export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate
   }
 
   return {
-    sensorAddress,
+    sensorId,
     enabled
   };
 }

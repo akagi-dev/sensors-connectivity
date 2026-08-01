@@ -157,7 +157,7 @@ export async function processAuthorizedEnvelope(
         payload: {
           status: publishStatus,
           pubsub_topic: context.config.pubsubTopic,
-          sensor_address: current.payload.sensor_address,
+          sensor_id: current.payload.sensor_id,
           nonce: current.payload.nonce,
           ...(publishError
             ? {
@@ -170,7 +170,7 @@ export async function processAuthorizedEnvelope(
       publishResultEvent: async (result) => {
         await context.publisher.publish(
           TELEMETRY_TOPICS.PUBSUB_RESULT,
-          `${result.payload.sensor_address}:${result.payload.nonce}`,
+          `${result.payload.sensor_id}:${result.payload.nonce}`,
           result as Envelope
         );
       },

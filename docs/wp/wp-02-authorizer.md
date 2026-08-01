@@ -30,7 +30,7 @@ Deliver a working Authorizer ingress path that:
 - HTTP endpoint: `POST /v1/telemetry`.
 - Request body fields:
   - `measurements`
-  - `sensor_address`
+  - `sensor_id`
   - `timestamp`
   - `nonce`
   - `signature`
@@ -51,9 +51,9 @@ Deliver a working Authorizer ingress path that:
 - [x] Replace Authorizer stubs/TODOs with real handler implementation for `POST /v1/telemetry`.
 - [x] Validate required fields, RFC3339 UTC timestamp format, and request size/limits.
 - [x] Implement deterministic canonicalization for `measurements` and signature verification:
-  - `canonical_measurements || timestamp || nonce || sensor_address`
+  - `canonical_measurements || timestamp || nonce || sensor_id`
   - verify Ed25519 signature against resolved public key.
-- [x] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_address` + `nonce`).
+- [x] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_id` + `nonce`).
 - [x] Read sensor/key status from Redis projection; reject disabled/unauthorized keys.
 - [x] Publish accepted requests to `telemetry.authorized.v1` with canonical envelope/payload from WP-00.
 - [x] Publish rejections to `telemetry.rejected.v1` with reason code/message.
@@ -62,7 +62,7 @@ Deliver a working Authorizer ingress path that:
 - [x] Add health/metrics endpoint and structured logging with `event_id`/`trace_id` correlation.
 
 ## Idempotency & error handling
-- Ingest dedup key: `sensor_address` + `nonce`.
+- Ingest dedup key: `sensor_id` + `nonce`.
 - Duplicate nonce for same sensor must return `409 Conflict`.
 - Signature mismatch must return `401 Unauthorized`.
 - Unauthorized/disabled sensor/key status must return `403 Forbidden`.

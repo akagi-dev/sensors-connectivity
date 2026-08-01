@@ -12,7 +12,7 @@ import { verifyTelemetrySignature } from './signature.js';
 const telemetryRequestSchema = z
   .object({
     measurements: z.record(z.unknown()),
-    sensor_address: z.string().min(1),
+    sensor_id: z.string().min(1),
     timestamp: z.string().datetime({ offset: true }),
     nonce: z.string().min(1),
     signature: z.string().min(1)
@@ -21,10 +21,10 @@ const telemetryRequestSchema = z
 
 const telemetryRequestJsonSchema = {
   type: 'object',
-  required: ['measurements', 'sensor_address', 'timestamp', 'nonce', 'signature'],
+  required: ['measurements', 'sensor_id', 'timestamp', 'nonce', 'signature'],
   properties: {
     measurements: { type: 'object' },
-    sensor_address: { type: 'string' },
+    sensor_id: { type: 'string' },
     timestamp: { type: 'string', format: 'date-time' },
     nonce: { type: 'string' },
     signature: { type: 'string' }
@@ -84,7 +84,7 @@ export function createAuthorizerApp(
             request.log.info({
               event_id: eventId,
               trace_id: traceId,
-              sensor_address: payload.sensor_address,
+              sensor_id: payload.sensor_id,
               reason_code: payload.reason_code
             });
           })
@@ -97,29 +97,29 @@ export function createAuthorizerApp(
       if (Number.isNaN(timestampMs) || skewMs > timestampSkewSeconds * 1000) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           reason_code: 'stale_timestamp',
           reason_message: 'Timestamp outside allowed skew window'
         });
         return reply.code(401).send({ status: 'rejected', error_code: 'stale_timestamp' });
       }
 
-      const record = await deps.registryReader.getSensorRecord(body.sensor_address);
+      const record = await deps.registryReader.getSensorRecord(body.sensor_id);
       if (!record || !record.enabled) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           reason_code: 'sensor_forbidden',
           reason_message: 'Sensor is unknown or disabled'
         });
         return reply.code(403).send({ status: 'rejected', error_code: 'sensor_forbidden' });
       }
 
-      const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_address, body.nonce);
+      const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_id, body.nonce);
       if (nonceSeen) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           reason_code: 'duplicate_nonce',
           reason_message: 'Nonce already used for this sensor'
         });
@@ -130,15 +130,15 @@ export function createAuthorizerApp(
         measurements: body.measurements,
         timestamp: body.timestamp,
         nonce: body.nonce,
-        sensorAddress: body.sensor_address,
+        sensorId: body.sensor_id,
         signature: body.signature,
-        signerAddress: record.sensorAddress
+        signerAddress: record.sensorId
       });
 
       if (!signatureValid) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           reason_code: 'invalid_signature',
           reason_message: 'Signature verification failed'
         });
@@ -147,7 +147,7 @@ export function createAuthorizerApp(
 
       try {
         const eventId = await deps.producer.publishAuthorized({
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           timestamp: body.timestamp,
           nonce: body.nonce,
           measurements: body.measurements,
@@ -156,7 +156,7 @@ export function createAuthorizerApp(
         request.log.info({
           event_id: eventId,
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           nonce: body.nonce
         });
       } catch (error) {
@@ -167,7 +167,7 @@ export function createAuthorizerApp(
       }
 
       try {
-        await deps.registryReader.rememberNonce(body.sensor_address, body.nonce);
+        await deps.registryReader.rememberNonce(body.sensor_id, body.nonce);
       } catch (error) {
         metrics.rejected += 1;
         request.log.error(error);

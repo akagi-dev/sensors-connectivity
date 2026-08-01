@@ -9,7 +9,7 @@ describe('authorizer read contract from redis projection', () => {
     const keys = createRedisKeyspace('registry-sync:v1');
 
     await redis.hset(keys.sensorState('sensor-1'), {
-      sensor_address: 'sensor-1',
+      sensor_id: 'sensor-1',
       enabled: 'true',
       updated_at_block: '100',
       updated_at_event: '100:0'
@@ -19,7 +19,7 @@ describe('authorizer read contract from redis projection', () => {
     const record = await reader.getSensorRecord('sensor-1');
 
     expect(record).toEqual({
-      sensorAddress: 'sensor-1',
+      sensorId: 'sensor-1',
       enabled: true
     });
 

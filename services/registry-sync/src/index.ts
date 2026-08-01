@@ -86,7 +86,7 @@ export function createRegistrySyncService(
         performExternalAction: async (current) => {
           const projection = mapRegistryEventToUpdate(current);
           if (!projection) {
-            throw new Error('Registry event missing sensorAddress for projection');
+            throw new Error('Registry event missing sensorId for projection');
           }
 
           await projectionStore.applyProjection(projection, {
@@ -101,7 +101,7 @@ export function createRegistrySyncService(
             eventIndex: current.eventIndex,
             section: current.section,
             method: current.method,
-            sensorAddress: projection.sensorAddress,
+            sensorId: projection.sensorId,
             enabled: projection.enabled
           });
         },

@@ -7,10 +7,10 @@ function telemetryMessageBytes(
   measurements: Record<string, unknown>,
   timestamp: string,
   nonce: string,
-  sensorAddress: string
+  sensorId: string
 ): Uint8Array {
   const canonicalMeasurements = canonicalize(measurements);
-  const concatenated = `${canonicalMeasurements}${timestamp}${nonce}${sensorAddress}`;
+  const concatenated = `${canonicalMeasurements}${timestamp}${nonce}${sensorId}`;
   return new TextEncoder().encode(concatenated);
 }
 
@@ -23,8 +23,8 @@ describe('verifyTelemetrySignature', () => {
     const measurements = { temp: 21, humidity: 54 };
     const timestamp = '2026-01-01T00:00:00Z';
     const nonce = 'nonce-1';
-    const sensorAddress = signerAddress;
-    const messageBytes = telemetryMessageBytes(measurements, timestamp, nonce, sensorAddress);
+    const sensorId = signerAddress;
+    const messageBytes = telemetryMessageBytes(measurements, timestamp, nonce, sensorId);
     const signatureBytes = ed25519Sign(messageBytes, pair);
 
     await expect(
@@ -32,7 +32,7 @@ describe('verifyTelemetrySignature', () => {
         measurements,
         timestamp,
         nonce,
-        sensorAddress,
+        sensorId,
         signature: Buffer.from(signatureBytes).toString('base64'),
         signerAddress
       })
@@ -53,7 +53,7 @@ describe('verifyTelemetrySignature', () => {
         measurements,
         timestamp: '2026-01-01T00:00:01Z',
         nonce: 'nonce-1',
-        sensorAddress: signerAddress,
+        sensorId: signerAddress,
         signature: Buffer.from(signatureBytes).toString('base64'),
         signerAddress
       })
@@ -66,7 +66,7 @@ describe('verifyTelemetrySignature', () => {
         measurements: { temp: 21 },
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
-        sensorAddress: '5FHneW46xGXgs5mUiveU4sbTyGBzmstN5fJQw6QvP5M4Xv4H',
+        sensorId: '5FHneW46xGXgs5mUiveU4sbTyGBzmstN5fJQw6QvP5M4Xv4H',
         signature: 'AA==',
         signerAddress: 'not-a-ss58-address'
       })

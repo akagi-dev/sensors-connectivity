@@ -38,14 +38,14 @@ describe.runIf(runRedisIntegration)('registry-sync redis integration', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-int'
+        sensorId: 'sensor-int'
       },
       {
         blockHeight: 402,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationDisabled',
-        sensorAddress: 'sensor-int'
+        sensorId: 'sensor-int'
       }
     ]);
 
