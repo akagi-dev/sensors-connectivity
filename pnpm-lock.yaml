@@ -54,6 +54,9 @@ importers:
       '@noble/ed25519':
         specifier: ^2.1.0
         version: 2.3.0
+      '@polkadot/util-crypto':
+        specifier: ^13.5.9
+        version: 13.5.9(@polkadot/util@13.5.9)
       '@scp/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
