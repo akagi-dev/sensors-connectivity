@@ -125,8 +125,13 @@ export function createHeartbeatTrackerState(
       const onlineUptimes: number[] = [];
       const sensorIds = await redis.smembers(keyspace.sensors);
 
-      for (const sensorId of sensorIds) {
-        const heartbeat = await redis.hgetall(keyspace.sensor(sensorId));
+      const heartbeats = await Promise.all(
+        sensorIds.map((sensorId) => redis.hgetall(keyspace.sensor(sensorId)))
+      );
+
+      for (let i = 0; i < sensorIds.length; i++) {
+        const sensorId = sensorIds[i];
+        const heartbeat = heartbeats[i];
         const firstSeen = Number.parseInt(heartbeat.firstSeen ?? '', 10);
         const lastSeen = Number.parseInt(heartbeat.lastSeen ?? '', 10);
         const onlineSince = Number.parseInt(heartbeat.onlineSince ?? '', 10);
