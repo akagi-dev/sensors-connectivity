@@ -67,6 +67,10 @@ function logInfo(message: string, context?: Record<string, unknown>): void {
   logger.info(context ?? {}, message);
 }
 
+function logDebug(message: string, context?: Record<string, unknown>): void {
+  logger.debug(context ?? {}, message);
+}
+
 function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
@@ -110,8 +114,16 @@ export function createHeartbeatTrackerState(
       const hasExisting = Number.isFinite(existingLastSeen);
 
       let onlineSince = Number.isFinite(existingOnlineSince) ? existingOnlineSince : observedAt;
+      const isNewSensor = !hasExisting;
+      const gapMs = hasExisting ? observedAt - existingLastSeen : 0;
+      
       if (hasExisting && observedAt - existingLastSeen > onlineWindowMs) {
         onlineSince = observedAt;
+        logDebug('sensor uptime streak reset after offline gap', {
+          sensor_id: sensorId,
+          gap_ms: gapMs,
+          online_window_ms: onlineWindowMs
+        });
       }
 
       await redis.hset(key, {
@@ -120,6 +132,15 @@ export function createHeartbeatTrackerState(
         onlineSince: String(onlineSince)
       });
       await redis.sadd(keyspace.sensors, sensorId);
+
+      if (isNewSensor) {
+        logInfo('new sensor tracked', { sensor_id: sensorId });
+      } else {
+        logDebug('sensor heartbeat recorded', {
+          sensor_id: sensorId,
+          gap_ms: gapMs
+        });
+      }
     },
     async createMetrics(consumed: number): Promise<HeartbeatTrackerMetrics> {
       const currentTime = now();
@@ -127,6 +148,12 @@ export function createHeartbeatTrackerState(
       const details: HeartbeatTrackerMetrics['sensors_uptime'] = [];
       const onlineUptimes: number[] = [];
       const sensorIds = await redis.smembers(keyspace.sensors);
+
+      logDebug('computing metrics', {
+        total_sensor_ids: sensorIds.length,
+        retention_window_ms: retentionWindowMs,
+        online_window_ms: onlineWindowMs
+      });
 
       const heartbeats = await Promise.all(
         sensorIds.map((sensorId) => redis.hgetall(keyspace.sensor(sensorId)))
@@ -141,6 +168,7 @@ export function createHeartbeatTrackerState(
         const lastSeen = Number.parseInt(heartbeat.lastSeen ?? '', 10);
         const onlineSince = Number.parseInt(heartbeat.onlineSince ?? '', 10);
         if (!Number.isFinite(firstSeen) || !Number.isFinite(lastSeen) || !Number.isFinite(onlineSince)) {
+          logDebug('skipping sensor with invalid heartbeat data', { sensor_id: sensorId });
           continue;
         }
         const secondsSinceLastSeen = Math.max(0, (currentTime - lastSeen) / 1000);
@@ -150,6 +178,11 @@ export function createHeartbeatTrackerState(
         // Mark sensor as stale if not seen within retention window
         if (currentTime - lastSeen > retentionWindowMs) {
           staleSensorIds.push(sensorId);
+          logDebug('sensor marked for pruning', {
+            sensor_id: sensorId,
+            seconds_since_last_seen: secondsSinceLastSeen,
+            retention_window_seconds: retentionWindowMs / 1000
+          });
           continue;
         }
 
@@ -170,6 +203,10 @@ export function createHeartbeatTrackerState(
 
       // Prune stale sensors from Redis
       if (staleSensorIds.length > 0) {
+        logInfo('pruning stale sensors from Redis', {
+          stale_count: staleSensorIds.length,
+          sensor_ids: staleSensorIds
+        });
         await Promise.all(
           staleSensorIds.map(async (sensorId) => {
             await redis.srem(keyspace.sensors, sensorId);
@@ -184,6 +221,14 @@ export function createHeartbeatTrackerState(
         sensorsOnline > 0
           ? onlineUptimes.reduce((total, current) => total + current, 0) / sensorsOnline
           : 0;
+
+      logDebug('metrics computed', {
+        sensors_online: sensorsOnline,
+        sensors_tracked: sensorIds.length - staleSensorIds.length,
+        sensors_pruned: staleSensorIds.length,
+        max_uptime_seconds: maxUptimeSeconds,
+        avg_uptime_seconds: avgUptimeSeconds
+      });
 
       return {
         sensors_online: sensorsOnline,
@@ -217,7 +262,7 @@ export function handleTelemetryMessage(
   }
 
   if (envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
-    logWarn('non-authorized envelope ignored', { eventType: envelopeResult.data.event_type });
+    logDebug('non-authorized envelope ignored', { eventType: envelopeResult.data.event_type });
     return Promise.resolve();
   }
 
@@ -228,6 +273,11 @@ export function handleTelemetryMessage(
 
   return tracker.recordAuthorizedSensor(envelope.payload.sensor_id).then(() => {
     consumed.value += 1;
+    logDebug('authorized event consumed', {
+      sensor_id: envelope.payload.sensor_id,
+      event_id: envelope.event_id,
+      total_consumed: consumed.value
+    });
   });
 }
 
@@ -268,6 +318,7 @@ export function createHeartbeatTrackerService(
         kafkaBrokers: config.kafkaBrokers,
         healthPort: config.healthPort,
         onlineWindowMs: config.onlineWindowMs,
+        retentionWindowMs: config.retentionWindowMs,
         redisUrl: config.redisUrl,
         redisKeyPrefix: config.redisKeyPrefix,
         source: config.source
@@ -281,7 +332,7 @@ export function createHeartbeatTrackerService(
         runPromise = consumer.run({
           eachMessage: async ({ message, partition, topic }) => {
             await handleTelemetryMessage(message.value?.toString('utf8') ?? '', tracker, consumed);
-            logInfo('message observed', { topic, partition, offset: message.offset, consumed: consumed.value });
+            logDebug('kafka message processed', { topic, partition, offset: message.offset, consumed: consumed.value });
           }
         });
         logInfo('service started');
@@ -352,6 +403,7 @@ export function startHealthAndMetricsServer(
 ): Server {
   const server = createServer(async (request, response) => {
     if (request.url === '/health') {
+      logDebug('health check requested');
       response.statusCode = 200;
       response.setHeader('content-type', 'application/json; charset=utf-8');
       response.end(JSON.stringify({ status: 'ok' }));
@@ -360,7 +412,13 @@ export function startHealthAndMetricsServer(
 
     if (request.url === '/metrics') {
       try {
+        logDebug('metrics endpoint requested');
         const metrics = await getMetrics();
+        logInfo('metrics served', {
+          sensors_online: metrics.sensors_online,
+          sensors_total_tracked: metrics.sensors_total_tracked,
+          consumed: metrics.consumed
+        });
         response.statusCode = 200;
         response.setHeader('content-type', 'application/json; charset=utf-8');
         response.end(JSON.stringify(metrics));
@@ -377,6 +435,7 @@ export function startHealthAndMetricsServer(
     response.end('not found');
   });
   server.listen({ host: '0.0.0.0', port });
+  logInfo('HTTP server listening', { port, host: '0.0.0.0' });
   return server;
 }
 
