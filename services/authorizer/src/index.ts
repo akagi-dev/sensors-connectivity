@@ -129,7 +129,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logWarn('telemetry rejected due to stale timestamp', {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           timestamp: body.timestamp,
           skew_ms: Number.isNaN(timestampMs) ? undefined : skewMs,
           allowed_skew_seconds: timestampSkewSeconds
@@ -147,7 +147,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logWarn('telemetry rejected due to unknown or disabled sensor', {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           sensor_record_found: Boolean(record),
           sensor_enabled: record?.enabled
         });
@@ -164,7 +164,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logWarn('telemetry rejected due to duplicate nonce', {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           nonce: body.nonce
         });
         publishRejectedEvent({
@@ -188,7 +188,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logWarn('telemetry rejected due to invalid signature', {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           nonce: body.nonce
         });
         publishRejectedEvent({
@@ -218,7 +218,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logError('failed to publish authorized telemetry event', error, {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           nonce: body.nonce
         });
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
@@ -230,7 +230,7 @@ export function createAuthorizerApp(
         metrics.rejected += 1;
         logError('failed to remember sensor nonce', error, {
           trace_id: traceId,
-          sensor_address: body.sensor_address,
+          sensor_id: body.sensor_id,
           nonce: body.nonce
         });
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
@@ -239,7 +239,7 @@ export function createAuthorizerApp(
       metrics.accepted += 1;
       logInfo('telemetry accepted', {
         trace_id: traceId,
-        sensor_address: body.sensor_address,
+        sensor_id: body.sensor_id,
         nonce: body.nonce
       });
       return reply.code(202).send({ status: 'accepted' });

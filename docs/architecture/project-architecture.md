@@ -14,6 +14,10 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 
 `Trusted Messages (Kafka) -> PubSub Broadcaster -> IPFS PubSub -> Web UI (sensors.social)`
 
+### Heartbeat observability
+
+`Trusted Messages (Kafka) -> Heartbeat Tracker -> /metrics (liveness + uptime)`
+
 ### Blockchain anchoring
 
 `Trusted Messages (Kafka) -> IPFS Publisher -> Message Bus (Kafka) -> Robonomics Blockchain`
@@ -46,6 +50,12 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 - Consumes authorized events from Kafka.
 - Publishes to libp2p/GossipSub topics.
 - Commits offset only after publish confirmation policy.
+
+### Heartbeat Tracker
+- Read-only observability consumer of trusted `telemetry.authorized.v1` events from Kafka.
+- Uses `fromBeginning: false` and tracks `firstSeen`, `lastSeen`, and `onlineSince` per sensor.
+- Exposes online-sensor counts and per-sensor/aggregate uptime metrics over a configurable online window (default 30s).
+- Does not emit result events and does not participate in retry/DLQ commit-result semantics.
 
 ### IPFS Publisher
 - Consumes authorized events from Kafka.
