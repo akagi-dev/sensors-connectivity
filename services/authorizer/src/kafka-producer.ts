@@ -13,12 +13,23 @@ export function createAuthorizerEventProducer(
   const kafka = new Kafka({ clientId: 'authorizer', brokers });
   const producer = kafka.producer();
   let connected = false;
+  let connectPromise: Promise<void> | undefined;
 
   return {
     async publishAuthorized(payload: TelemetryAuthorizedPayload): Promise<void> {
       if (!connected) {
-        await producer.connect();
-        connected = true;
+        if (!connectPromise) {
+          connectPromise = producer.connect().then(() => {
+            connected = true;
+          });
+        }
+
+        try {
+          await connectPromise;
+        } catch (error) {
+          connectPromise = undefined;
+          throw error;
+        }
       }
 
       await producer.send({
