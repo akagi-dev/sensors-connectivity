@@ -9,7 +9,31 @@ import {
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import pino from 'pino';
 import { loadBlockchainAnchorConfig } from './config.js';
+
+const logger = pino({
+  name: 'blockchain-anchor',
+  level: process.env.BLOCKCHAIN_ANCHOR_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+});
+
+function logInfo(message: string, context?: Record<string, unknown>): void {
+  logger.info(context ?? {}, message);
+}
+
+function logWarn(message: string, context?: Record<string, unknown>): void {
+  logger.warn(context ?? {}, message);
+}
+
+function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  logger.error(
+    {
+      ...(context ?? {}),
+      error: error instanceof Error ? error.message : String(error)
+    },
+    message
+  );
+}
 
 export async function startBlockchainAnchor(): Promise<void> {
   const config = loadBlockchainAnchorConfig();
@@ -25,10 +49,10 @@ export async function startBlockchainAnchor(): Promise<void> {
 
   const retryDlqPublisher: RetryDlqPublisher<TelemetryIpfsPublishedPayload> = {
     async publishRetry(event, reason) {
-      console.log('[blockchain-anchor] retry stub', TELEMETRY_TOPICS.RETRY, event.cid, reason);
+      logWarn('retry stub', { topic: TELEMETRY_TOPICS.RETRY, cid: event.cid, reason });
     },
     async publishDlq(event, reason) {
-      console.log('[blockchain-anchor] dlq stub', TELEMETRY_TOPICS.DLQ, event.cid, reason);
+      logWarn('dlq stub', { topic: TELEMETRY_TOPICS.DLQ, cid: event.cid, reason });
     }
   };
 
@@ -42,7 +66,7 @@ export async function startBlockchainAnchor(): Promise<void> {
       },
       performExternalAction: async (event) => {
         // TODO: submit CID-only anchor extrinsic to substrate-based Robonomics chain.
-        console.log('[blockchain-anchor] submit CID stub', event.cid);
+        logInfo('submit CID stub', { cid: event.cid });
       },
       waitForConfirmation: async () => {
         // TODO: wait for submission confirmation; finality/reorg handling is deferred.
@@ -61,16 +85,16 @@ export async function startBlockchainAnchor(): Promise<void> {
         }
       }),
       publishResultEvent: async (result) => {
-        console.log('[blockchain-anchor] result stub', result);
+        logInfo('result stub', { result });
       },
       commitOffset: async () => {
-        console.log('[blockchain-anchor] commit offset stub');
+        logInfo('commit offset stub');
       },
       retryDlqPublisher
     }
   );
 
-  console.log('[blockchain-anchor] started in phase-1 CID-only stub mode', {
+  logInfo('started in phase-1 CID-only stub mode', {
     substrateWsUrl: config.substrateWsUrl,
     target: config.target
   });
@@ -79,7 +103,7 @@ export async function startBlockchainAnchor(): Promise<void> {
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   startBlockchainAnchor().catch((error: unknown) => {
-    console.error('[blockchain-anchor] failed to start', error);
+    logError('failed to start', error);
     process.exitCode = 1;
   });
 }

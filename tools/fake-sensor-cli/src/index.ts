@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { canonicalize } from 'json-canonicalize';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import pino from 'pino';
 
 export interface FakeSensorCliOptions {
   endpointUrl: string;
@@ -16,6 +17,29 @@ const DEFAULT_ENDPOINT_URL = 'http://localhost:3000/v1/telemetry';
 const DEFAULT_COUNT = 1;
 const DEFAULT_INTERVAL_MS = 1000;
 const DEFAULT_SIGNER_SEED_HEX = '0x0000000000000000000000000000000000000000000000000000000000000001';
+
+const logger = pino({
+  name: 'fake-sensor-cli',
+  level: process.env.FAKE_SENSOR_CLI_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+});
+
+function logInfo(message: string, context?: Record<string, unknown>): void {
+  logger.info(context ?? {}, message);
+}
+
+function logWarn(message: string, context?: Record<string, unknown>): void {
+  logger.warn(context ?? {}, message);
+}
+
+function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  logger.error(
+    {
+      ...(context ?? {}),
+      error: error instanceof Error ? error.message : String(error)
+    },
+    message
+  );
+}
 
 export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv): FakeSensorCliOptions {
   const argValues = new Map<string, string>();
@@ -154,7 +178,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function printUsage() {
-  console.log(`Usage: pnpm --filter @scp/fake-sensor-cli fake-sensor -- [options]\n
+  logInfo(`Usage: pnpm --filter @scp/fake-sensor-cli fake-sensor -- [options]\n
 Options:
   --endpoint <url>         Target telemetry endpoint (default: http://localhost:3000/v1/telemetry)
   --sensor-address <ss58>  Sensor address. Must match signer seed public key.
@@ -184,7 +208,7 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
     await cryptoWaitReady();
     options = parseFakeSensorCliOptions(args, env);
   } catch (error) {
-    console.error('[fake-sensor-cli] invalid options', error);
+    logError('invalid options', error);
     return 1;
   }
 
@@ -203,7 +227,11 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
       headers['x-sensor-zone'] = options.sensorZone;
     }
 
-    console.log(`[fake-sensor-cli] sending ${i + 1}/${options.count}`, payload);
+    logInfo('sending telemetry payload', {
+      iteration: i + 1,
+      total: options.count,
+      payload
+    });
 
     try {
       const response = await fetch(options.endpointUrl, {
@@ -211,12 +239,19 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
         headers,
         body: JSON.stringify(payload)
       });
-      console.log(`[fake-sensor-cli] response ${response.status} ${response.statusText}`);
+      if (response.ok) {
+        logInfo('response received', { status: response.status, statusText: response.statusText });
+      } else {
+        logWarn('response received with non-ok status', {
+          status: response.status,
+          statusText: response.statusText
+        });
+      }
       if (!response.ok) {
         return 1;
       }
     } catch (error) {
-      console.error('[fake-sensor-cli] request failed', error);
+      logError('request failed', error);
       return 1;
     }
 
@@ -235,7 +270,7 @@ if (isDirectRun) {
       process.exitCode = exitCode;
     })
     .catch((error: unknown) => {
-      console.error('[fake-sensor-cli] unexpected failure', error);
+      logError('unexpected failure', error);
       process.exitCode = 1;
     });
 }

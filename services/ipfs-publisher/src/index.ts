@@ -8,11 +8,35 @@ import {
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import pino from 'pino';
 import { loadIpfsPublisherConfig } from './config.js';
 
 interface AuthorizedBatch {
   batch_id: string;
   events: TelemetryAuthorizedPayload[];
+}
+
+const logger = pino({
+  name: 'ipfs-publisher',
+  level: process.env.IPFS_PUBLISHER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+});
+
+function logInfo(message: string, context?: Record<string, unknown>): void {
+  logger.info(context ?? {}, message);
+}
+
+function logWarn(message: string, context?: Record<string, unknown>): void {
+  logger.warn(context ?? {}, message);
+}
+
+function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  logger.error(
+    {
+      ...(context ?? {}),
+      error: error instanceof Error ? error.message : String(error)
+    },
+    message
+  );
 }
 
 export async function startIpfsPublisher(): Promise<void> {
@@ -35,10 +59,10 @@ export async function startIpfsPublisher(): Promise<void> {
 
   const retryDlqPublisher: RetryDlqPublisher<AuthorizedBatch> = {
     async publishRetry(event, reason) {
-      console.log('[ipfs-publisher] retry stub', TELEMETRY_TOPICS.RETRY, event.batch_id, reason);
+      logWarn('retry stub', { topic: TELEMETRY_TOPICS.RETRY, batchId: event.batch_id, reason });
     },
     async publishDlq(event, reason) {
-      console.log('[ipfs-publisher] dlq stub', TELEMETRY_TOPICS.DLQ, event.batch_id, reason);
+      logWarn('dlq stub', { topic: TELEMETRY_TOPICS.DLQ, batchId: event.batch_id, reason });
     }
   };
 
@@ -50,7 +74,7 @@ export async function startIpfsPublisher(): Promise<void> {
     },
     performExternalAction: async () => {
       // TODO: deterministic batching + serialize object/CAR.
-      console.log('[ipfs-publisher] build and publish IPFS object/CAR stub');
+      logInfo('build and publish IPFS object/CAR stub');
     },
     waitForConfirmation: async () => {
       // TODO: wait for publish/pin confirmation.
@@ -67,21 +91,21 @@ export async function startIpfsPublisher(): Promise<void> {
       }
     }),
     publishResultEvent: async (result) => {
-      console.log('[ipfs-publisher] result stub', result);
+      logInfo('result stub', { result });
     },
     commitOffset: async () => {
-      console.log('[ipfs-publisher] commit offset stub');
+      logInfo('commit offset stub');
     },
     retryDlqPublisher
   });
 
-  console.log('[ipfs-publisher] started in stub mode', { ipfsApiUrl: config.ipfsApiUrl });
+  logInfo('started in stub mode', { ipfsApiUrl: config.ipfsApiUrl });
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   startIpfsPublisher().catch((error: unknown) => {
-    console.error('[ipfs-publisher] failed to start', error);
+    logError('failed to start', error);
     process.exitCode = 1;
   });
 }
