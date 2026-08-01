@@ -36,7 +36,7 @@ services:
 
   substrate:
     image: robonomics/robonomics:latest
-    command: ["--dev", "--ws-external", "--rpc-external", "--unsafe-ws-external"]
+    command: ["robonomics", "--dev", "--unsafe-rpc-external", "--rpc-methods=unsafe"]
     ports:
       - "9944:9944"
       - "9933:9933"

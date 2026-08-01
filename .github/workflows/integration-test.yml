@@ -1,0 +1,259 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+jobs:
+  pubsub-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAFKA_BROKERS: localhost:9092
+      REDIS_URL: redis://localhost:6379
+      IPFS_API_URL: http://127.0.0.1:5001
+      SUBSTRATE_WS_URL: ws://127.0.0.1:9944
+      AUTHORIZER_PORT: "3000"
+      AUTHORIZER_SOURCE: authorizer
+      AUTHORIZER_TIMESTAMP_SKEW_SECONDS: "300"
+      AUTHORIZER_PRODUCER_MAX_ATTEMPTS: "3"
+      AUTHORIZER_PRODUCER_RETRY_BACKOFF_MS: "100"
+      REGISTRY_REDIS_PREFIX: registry-sync:v1
+      REGISTRY_SYNC_HEALTH_PORT: "3011"
+      REGISTRY_SYNC_MAX_RETRIES: "3"
+      REGISTRY_SYNC_RETRY_BACKOFF_MS: "250"
+      NONCE_TTL_SECONDS: "900"
+      PUBSUB_TOPIC: telemetry/authorized/v1
+      PUBSUB_BROADCASTER_GROUP_ID: pubsub-broadcaster-v1
+      PUBSUB_BROADCASTER_SOURCE: pubsub-broadcaster
+      PUBSUB_BROADCASTER_HEALTH_PORT: "3020"
+      PUBSUB_BROADCASTER_MAX_RETRIES: "3"
+      PUBSUB_BROADCASTER_RETRY_BACKOFF_MS: "250"
+      BLOCKCHAIN_TARGET: robonomics-dev
+      SENSOR_SIGNER_SEED_HEX: "0x0101010101010101010101010101010101010101010101010101010101010101"
+      SENSOR_MESSAGE_COUNT: "5"
+      SENSOR_INTERVAL_MS: "1000"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+          run_install: false
+
+      - name: Setup Node from .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Launch docker infrastructure
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          docker compose up -d
+
+      - name: Wait for infrastructure readiness
+        run: |
+          set -euo pipefail
+
+          wait_for_port() {
+            local name="$1"
+            local host="$2"
+            local port="$3"
+            local timeout="$4"
+            local elapsed=0
+            until node -e "const net=require('node:net');const socket=net.connect({host:'${host}',port:${port}});socket.on('connect',()=>{socket.end();process.exit(0);});socket.on('error',()=>process.exit(1));"; do
+              if [ "$elapsed" -ge "$timeout" ]; then
+                echo "Timed out waiting for ${name} at ${host}:${port}" >&2
+                exit 1
+              fi
+              elapsed=$((elapsed + 2))
+              sleep 2
+            done
+            echo "${name} is reachable at ${host}:${port}"
+          }
+
+          wait_for_port "Kafka" "127.0.0.1" "9092" "180"
+          wait_for_port "Redis" "127.0.0.1" "6379" "120"
+          wait_for_port "Substrate WS" "127.0.0.1" "9944" "240"
+
+          elapsed=0
+          until curl --silent --show-error --fail -X POST "${IPFS_API_URL}/api/v0/version" >/dev/null; do
+            if [ "$elapsed" -ge 120 ]; then
+              echo "Timed out waiting for IPFS API at ${IPFS_API_URL}" >&2
+              exit 1
+            fi
+            elapsed=$((elapsed + 2))
+            sleep 2
+          done
+          echo "IPFS API is ready"
+
+      - name: Start all application services
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+
+          SENSOR_ID="$(pnpm --filter @scp/authorizer exec node --input-type=module <<'NODE'
+          import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
+          await cryptoWaitReady();
+          const seedHex = (process.env.SENSOR_SIGNER_SEED_HEX ?? '').replace(/^0x/, '');
+          const pair = ed25519PairFromSeed(Buffer.from(seedHex, 'hex'));
+          process.stdout.write(encodeAddress(pair.publicKey));
+          NODE
+          )"
+          echo "SENSOR_ID=${SENSOR_ID}" | tee -a "$GITHUB_ENV"
+
+          docker compose exec -T redis redis-cli HSET "${REGISTRY_REDIS_PREFIX}:sensor:${SENSOR_ID}" \
+            sensor_id "${SENSOR_ID}" \
+            enabled true \
+            updated_at_block 1 \
+            updated_at_event ci-seed >/dev/null
+
+          IPFS_PEER_ID="$(curl --silent --show-error --fail -X POST "${IPFS_API_URL}/api/v0/id" | node --input-type=module -e "let data='';process.stdin.on('data',(chunk)=>data+=chunk);process.stdin.on('end',()=>{const parsed=JSON.parse(data);if(!parsed.ID){process.exit(1);}process.stdout.write(parsed.ID);});")"
+          PUBSUB_RESERVED_PEERS="/ip4/127.0.0.1/tcp/4001/p2p/${IPFS_PEER_ID}"
+          echo "PUBSUB_RESERVED_PEERS=${PUBSUB_RESERVED_PEERS}" | tee -a "$GITHUB_ENV"
+
+          (pnpm --filter @scp/registry-sync dev > logs/registry-sync.log 2>&1 & echo $! > logs/registry-sync.pid)
+          (pnpm --filter @scp/authorizer dev > logs/authorizer.log 2>&1 & echo $! > logs/authorizer.pid)
+          (PUBSUB_RESERVED_PEERS="${PUBSUB_RESERVED_PEERS}" pnpm --filter @scp/pubsub-broadcaster dev > logs/pubsub-broadcaster.log 2>&1 & echo $! > logs/pubsub-broadcaster.pid)
+          (pnpm --filter @scp/ipfs-publisher dev > logs/ipfs-publisher.log 2>&1 & echo $! > logs/ipfs-publisher.pid)
+          (pnpm --filter @scp/blockchain-anchor dev > logs/blockchain-anchor.log 2>&1 & echo $! > logs/blockchain-anchor.pid)
+
+      - name: Wait for service health endpoints
+        run: |
+          set -euo pipefail
+
+          wait_for_http() {
+            local name="$1"
+            local url="$2"
+            local timeout="$3"
+            local elapsed=0
+            until curl --silent --show-error --fail "$url" >/dev/null; do
+              if [ "$elapsed" -ge "$timeout" ]; then
+                echo "Timed out waiting for ${name} at ${url}" >&2
+                exit 1
+              fi
+              elapsed=$((elapsed + 2))
+              sleep 2
+            done
+            echo "${name} is healthy: ${url}"
+          }
+
+          wait_for_http "Authorizer" "http://127.0.0.1:${AUTHORIZER_PORT}/health" "120"
+          wait_for_http "Registry Sync" "http://127.0.0.1:${REGISTRY_SYNC_HEALTH_PORT}/health" "180"
+          wait_for_http "Pubsub Broadcaster" "http://127.0.0.1:${PUBSUB_BROADCASTER_HEALTH_PORT}/health" "180"
+
+      - name: Send telemetry and collect pubsub deliveries
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+
+          node tools/integration/verify-pubsub-delivery.mjs collect \
+            --topic "${PUBSUB_TOPIC}" \
+            --expected-count "${SENSOR_MESSAGE_COUNT}" \
+            --timeout-ms 120000 \
+            --sensor-id "${SENSOR_ID}" \
+            --output-file logs/pubsub-messages.json > logs/pubsub-subscriber.log 2>&1 &
+          collector_pid=$!
+
+          trap 'kill "$collector_pid" 2>/dev/null || true' EXIT
+
+          if ! pnpm fake-sensor -- \
+            --endpoint "http://127.0.0.1:${AUTHORIZER_PORT}/v1/telemetry" \
+            --count "${SENSOR_MESSAGE_COUNT}" \
+            --interval-ms "${SENSOR_INTERVAL_MS}" \
+            --signer-seed-hex "${SENSOR_SIGNER_SEED_HEX}" \
+            --sensor-zone eu-west > logs/fake-sensor.log 2>&1; then
+            echo "Fake sensor CLI failed" >&2
+            exit 1
+          fi
+
+          if ! wait "$collector_pid"; then
+            echo "Pubsub collector failed or timed out" >&2
+            exit 1
+          fi
+
+      - name: Verify pubsub payload delivery
+        run: |
+          set -euo pipefail
+          node tools/integration/verify-pubsub-delivery.mjs verify \
+            --expected-count "${SENSOR_MESSAGE_COUNT}" \
+            --fake-sensor-log-file logs/fake-sensor.log \
+            --pubsub-messages-file logs/pubsub-messages.json
+
+      - name: Verify kafka result topic contains pubsub results
+        run: |
+          set -euo pipefail
+          docker compose exec -T kafka kafka-console-consumer \
+            --bootstrap-server localhost:9092 \
+            --topic telemetry.pubsub.result.v1 \
+            --from-beginning \
+            --timeout-ms 10000 \
+            --max-messages "${SENSOR_MESSAGE_COUNT}" > logs/kafka-pubsub-result.log || true
+
+          if [ ! -s logs/kafka-pubsub-result.log ]; then
+            echo "No telemetry.pubsub.result.v1 messages found" >&2
+            exit 1
+          fi
+
+      - name: Inspect service logs for expected flow
+        run: |
+          set -euo pipefail
+
+          if ! grep -q 'telemetry accepted' logs/authorizer.log; then
+            echo 'Authorizer log does not show accepted telemetry' >&2
+            exit 1
+          fi
+
+          if ! grep -q 'authorized envelope handled' logs/pubsub-broadcaster.log; then
+            echo 'Pubsub broadcaster log does not show authorized envelope processing' >&2
+            exit 1
+          fi
+
+          if ! grep -q '"status":"submitted"' logs/kafka-pubsub-result.log; then
+            echo 'Pubsub result topic log does not show submitted status' >&2
+            exit 1
+          fi
+
+          if grep -Eqi '(^|[^a-z])(error|exception|unhandledrejection|econnrefused|failed to start|failed to publish)([^a-z]|$)' \
+            logs/authorizer.log logs/registry-sync.log logs/pubsub-broadcaster.log logs/ipfs-publisher.log logs/blockchain-anchor.log; then
+            echo 'Detected error markers in service logs' >&2
+            exit 1
+          fi
+
+      - name: Capture docker compose logs
+        if: always()
+        run: |
+          mkdir -p logs
+          docker compose logs --no-color > logs/docker-compose.log
+
+      - name: Upload integration logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-logs
+          path: logs/
+          if-no-files-found: ignore
+
+      - name: Stop services and docker infrastructure
+        if: always()
+        run: |
+          for pid_file in logs/*.pid; do
+            if [ -f "$pid_file" ]; then
+              kill "$(cat "$pid_file")" 2>/dev/null || true
+            fi
+          done
+          docker compose down -v
