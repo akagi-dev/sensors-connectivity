@@ -1,6 +1,10 @@
+import Redis from 'ioredis';
+import { loadRegistrySyncConfig } from './config.js';
+import { createRedisKeyspace } from './keyspace.js';
+import { RedisProjectionStore, type RedisLike } from './projection-store.js';
+
 export interface SensorRegistryRecord {
   sensorAddress: string;
-  publicKey: string;
   enabled: boolean;
 }
 
@@ -33,13 +37,49 @@ export class InMemoryRegistryReader implements RegistryReader {
   }
 }
 
-export function createRegistryReaderFromEnv(): RegistryReader {
-  // TODO: wire ioredis-backed projection tables written by the registry sync consumer.
-  return new InMemoryRegistryReader([
-    {
-      sensorAddress: 'sensor-dev-1',
-      publicKey: 'TODO_SENSOR_PUBLIC_KEY_BASE64',
-      enabled: true
+export class RedisRegistryReader implements RegistryReader {
+  private readonly projectionStore: RedisProjectionStore;
+
+  constructor(
+    private readonly redis: RedisLike,
+    redisKeyPrefix: string,
+    private readonly nonceTtlSeconds: number
+  ) {
+    this.projectionStore = new RedisProjectionStore(redis, createRedisKeyspace(redisKeyPrefix));
+  }
+
+  async getSensorRecord(sensorAddress: string): Promise<SensorRegistryRecord | null> {
+    const record = await this.projectionStore.readSensor(sensorAddress);
+    if (!record) {
+      return null;
     }
-  ]);
+
+    return {
+      sensorAddress: record.sensorAddress,
+      enabled: record.enabled
+    };
+  }
+
+  async isNonceSeen(sensorAddress: string, nonce: string): Promise<boolean> {
+    return this.projectionStore.isNonceSeen(sensorAddress, nonce);
+  }
+
+  async rememberNonce(sensorAddress: string, nonce: string): Promise<void> {
+    await this.projectionStore.rememberNonce(sensorAddress, nonce, this.nonceTtlSeconds);
+  }
+}
+
+let sharedRedisReader: RedisRegistryReader | null = null;
+type RedisConstructor = new (url: string) => RedisLike;
+
+export function createRegistryReaderFromEnv(): RegistryReader {
+  if (sharedRedisReader) {
+    return sharedRedisReader;
+  }
+
+  const config = loadRegistrySyncConfig();
+  const RedisClient = Redis as unknown as RedisConstructor;
+  const redis = new RedisClient(config.redisUrl);
+  sharedRedisReader = new RedisRegistryReader(redis, config.redisKeyPrefix, config.nonceTtlSeconds);
+  return sharedRedisReader;
 }
