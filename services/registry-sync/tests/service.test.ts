@@ -208,6 +208,8 @@ describe('registry sync service processing', () => {
         _onEvent: (event: never) => Promise<void>,
         _onFinalizedHead?: (height: number) => Promise<void> | void
       ) {
+        void _onEvent;
+        void _onFinalizedHead;
         secondStartFrom = fromInclusiveHeight;
       },
       async stop() {
