@@ -49,6 +49,7 @@ services/registry-sync     # substrate->redis projection sync service
 services/pubsub-broadcaster
 services/ipfs-publisher
 services/blockchain-anchor # phase-1 CID-only anchoring stub
+tools/fake-sensor-cli      # fake telemetry sender for debug/tests
 ```
 
 ## Per-service development
@@ -71,10 +72,10 @@ Run from repo root:
 pnpm fake-sensor -- --endpoint http://localhost:3000/v1/telemetry --sensor-id debug-01 --count 5 --interval-ms 1000
 ```
 
-Run directly in authorizer workspace:
+Run directly in tools workspace:
 
 ```bash
-pnpm --filter @scp/authorizer fake-sensor -- --count 3
+pnpm --filter @scp/fake-sensor-cli fake-sensor -- --count 3
 ```
 
 Available options:

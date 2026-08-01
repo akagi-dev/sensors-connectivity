@@ -101,7 +101,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function printUsage() {
-  console.log(`Usage: pnpm --filter @scp/authorizer fake-sensor -- [options]\n
+  console.log(`Usage: pnpm --filter @scp/fake-sensor-cli fake-sensor -- [options]\n
 Options:
   --endpoint <url>       Target telemetry endpoint (default: http://localhost:3000/v1/telemetry)
   --sensor-id <id>       Sensor identifier (default: debug-sensor-001)

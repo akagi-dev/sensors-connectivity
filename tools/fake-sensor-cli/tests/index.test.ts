@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFakePayload, parseFakeSensorCliOptions } from '../src/fake-sensor-cli.js';
+import { createFakePayload, parseFakeSensorCliOptions } from '../src/index.js';
 
 describe('fake sensor CLI', () => {
   it('parses args with defaults', () => {

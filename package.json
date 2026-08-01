@@ -8,7 +8,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "dev": "turbo run dev --parallel",
-    "fake-sensor": "pnpm --filter @scp/authorizer fake-sensor"
+    "fake-sensor": "pnpm --filter @scp/fake-sensor-cli fake-sensor"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
