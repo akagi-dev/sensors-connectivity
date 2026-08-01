@@ -47,6 +47,7 @@ packages/contracts         # @scp/contracts shared schemas/types/helpers
 services/authorizer        # POST /v1/telemetry ingress stub
 services/registry-sync     # substrate->redis projection sync service
 services/pubsub-broadcaster
+services/heartbeat-tracker  # online-sensor liveness & uptime metrics from trusted events
 services/ipfs-publisher
 services/blockchain-anchor # phase-1 CID-only anchoring stub
 tools/fake-sensor-cli      # fake telemetry sender for debug/tests
@@ -58,6 +59,7 @@ tools/fake-sensor-cli      # fake telemetry sender for debug/tests
 pnpm --filter @scp/authorizer dev
 pnpm --filter @scp/registry-sync dev
 pnpm --filter @scp/pubsub-broadcaster dev
+pnpm --filter @scp/heartbeat-tracker dev
 pnpm --filter @scp/ipfs-publisher dev
 pnpm --filter @scp/blockchain-anchor dev
 ```
@@ -99,6 +101,7 @@ The CLI now sends authorizer-compatible payloads (`sensor_id`, `timestamp`, `non
 - **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
 - **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
 - **pubsub-broadcaster**: consumes `telemetry.authorized.v1`, validates contracts, publishes to GossipSub (with optional reserved peers), emits `telemetry.pubsub.result.v1`, and routes exhausted failures to DLQ.
+- **heartbeat-tracker**: consumes trusted `telemetry.authorized.v1`, stores per-sensor first/last seen plus continuous uptime streaks in Redis, and exposes `sensors_online` + uptime metrics over a configurable online window (default 30s).
 - **ipfs-publisher**: consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
 - **blockchain-anchor**: consumes `telemetry.ipfs.result.v1`, dedups by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring.
 
