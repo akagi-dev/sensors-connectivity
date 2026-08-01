@@ -180,14 +180,14 @@ export function createRegistrySyncService(
       if (result === 'retried') {
         logDebug('consumer processing requested retry', {
           eventId,
-          attempt: processingAttempt
+          attempt: loopAttempt
         });
         logStructured('retry_backoff_wait', {
           eventId,
           retryBackoffMs: config.retryBackoffMs
         });
         await sleep(config.retryBackoffMs);
-        processingAttempt += 1;
+        loopAttempt += 1;
         continue;
       }
 
