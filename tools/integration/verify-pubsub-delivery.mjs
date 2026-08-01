@@ -74,18 +74,22 @@ function parseArgs(args) {
 }
 
 function decodePubsubPayload(line) {
-  const parsed = JSON.parse(line);
-  if (!parsed.data) {
+  try {
+    const parsed = JSON.parse(line);
+    if (!parsed?.data || typeof parsed.data !== 'string') {
+      return null;
+    }
+
+    const decoded = Buffer.from(parsed.data, 'base64').toString('utf8');
+    const payload = JSON.parse(decoded);
+    if (!payload?.sensor_id || !payload?.nonce) {
+      return null;
+    }
+
+    return payload;
+  } catch {
     return null;
   }
-
-  const decoded = Buffer.from(parsed.data, 'base64').toString('utf8');
-  const payload = JSON.parse(decoded);
-  if (!payload?.sensor_id || !payload?.nonce) {
-    return null;
-  }
-
-  return payload;
 }
 
 async function collectMessages(options) {
