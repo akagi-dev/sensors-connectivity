@@ -28,14 +28,14 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-a'
+        sensorId: 'sensor-a'
       },
       {
         blockHeight: 200,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-a'
+        sensorId: 'sensor-a'
       }
     ]);
 
@@ -65,7 +65,7 @@ describe('registry sync service processing', () => {
         eventIndex: 1,
         section: 'registry',
         method: 'AuthorizationUpdated',
-        sensorAddress: 'sensor-b'
+        sensorId: 'sensor-b'
       }
     ]);
 
@@ -98,7 +98,7 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-d'
+        sensorId: 'sensor-d'
       }
     ]);
 
@@ -241,14 +241,14 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-old'
+        sensorId: 'sensor-old'
       },
       {
         blockHeight: 300,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorAddress: 'sensor-new'
+        sensorId: 'sensor-new'
       }
     ]);
 
@@ -265,8 +265,8 @@ describe('registry sync service processing', () => {
     const oldSensor = await redis.hgetall(keys.sensorState('sensor-old'));
     const newSensor = await redis.hgetall(keys.sensorState('sensor-new'));
 
-    expect(oldSensor.sensor_address).toBeUndefined();
-    expect(newSensor.sensor_address).toBe('sensor-new');
+    expect(oldSensor.sensor_id).toBeUndefined();
+    expect(newSensor.sensor_id).toBe('sensor-new');
     expect(await redis.get(keys.cursorHeight)).toBe('300');
   });
 });

@@ -6,7 +6,7 @@ import pino from 'pino';
 
 export interface FakeSensorCliOptions {
   endpointUrl: string;
-  sensorAddress: string;
+  sensorId: string;
   count: number;
   intervalMs: number;
   sensorZone?: string;
@@ -49,7 +49,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     'count',
     'interval-ms',
     'sensor-zone',
-    'sensor-address',
+    'sensor-id',
     'sensor-id'
   ]);
 
@@ -92,18 +92,18 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   const seed = parseSeedHex(signerSeedHex);
   const signer = ed25519PairFromSeed(seed);
   const derivedAddress = encodeAddress(signer.publicKey);
-  const sensorAddress =
-    argValues.get('sensor-address') ??
-    env.SENSOR_FAKE_SENSOR_ADDRESS ??
+  const sensorId =
+    argValues.get('sensor-id') ??
+    env.SENSOR_FAKE_SENSOR_ID ??
     derivedAddress;
 
-  if (sensorAddress !== derivedAddress) {
-    throw new Error(`sensor address does not match signer seed: ${sensorAddress}`);
+  if (sensorId !== derivedAddress) {
+    throw new Error(`sensor id does not match signer seed: ${sensorId}`);
   }
 
   const options: FakeSensorCliOptions = {
     endpointUrl,
-    sensorAddress,
+    sensorId,
     count,
     intervalMs,
     signerSeedHex
@@ -116,9 +116,9 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   return options;
 }
 
-export function createFakePayload(sensorAddress: string) {
+export function createFakePayload(sensorId: string) {
   return {
-    sensor_address: sensorAddress,
+    sensor_id: sensorId,
     timestamp: new Date().toISOString(),
     nonce: randomUUID(),
     measurements: {
@@ -168,7 +168,7 @@ function signPayload(
 ): string {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
   const canonicalMeasurements = canonicalize(payload.measurements);
-  const message = `${canonicalMeasurements}${payload.timestamp}${payload.nonce}${payload.sensor_address}`;
+  const message = `${canonicalMeasurements}${payload.timestamp}${payload.nonce}${payload.sensor_id}`;
   const signature = ed25519Sign(new TextEncoder().encode(message), pair);
   return Buffer.from(signature).toString('base64');
 }
@@ -181,7 +181,7 @@ function printUsage() {
   logInfo(`Usage: pnpm --filter @scp/fake-sensor-cli fake-sensor -- [options]\n
 Options:
   --endpoint <url>         Target telemetry endpoint (default: http://localhost:3000/v1/telemetry)
-  --sensor-address <ss58>  Sensor address. Must match signer seed public key.
+  --sensor-id <ss58>  Sensor ID. Must match signer seed public key.
   --signer-seed-hex <hex>  32-byte Ed25519 seed hex (default: deterministic debug seed)
   --sensor-zone <zone>     Optional X-Sensor-Zone header (ru|eu-west|us-east|ap-southeast)
   --count <n>              Number of messages to send (default: 1)
@@ -190,7 +190,7 @@ Options:
 
 Environment variable equivalents:
   SENSOR_FAKE_ENDPOINT_URL
-  SENSOR_FAKE_SENSOR_ADDRESS
+  SENSOR_FAKE_SENSOR_ID
   SENSOR_FAKE_SIGNER_SEED_HEX
   SENSOR_FAKE_SENSOR_ZONE
   SENSOR_FAKE_COUNT
@@ -213,7 +213,7 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
   }
 
   for (let i = 0; i < options.count; i += 1) {
-    const unsignedPayload = createFakePayload(options.sensorAddress);
+    const unsignedPayload = createFakePayload(options.sensorId);
     const payload = {
       ...unsignedPayload,
       signature: signPayload(unsignedPayload, options.signerSeedHex)

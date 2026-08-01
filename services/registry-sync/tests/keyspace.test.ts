@@ -15,7 +15,7 @@ describe('keyspace and mapping', () => {
       eventIndex: 2,
       section: 'registry',
       method: 'AuthorizationCreated',
-      sensorAddress: 'sensor-1'
+      sensorId: 'sensor-1'
     });
 
     const disabled = mapRegistryEventToUpdate({
@@ -23,11 +23,11 @@ describe('keyspace and mapping', () => {
       eventIndex: 0,
       section: 'registry',
       method: 'AuthorizationDisabled',
-      sensorAddress: 'sensor-1'
+      sensorId: 'sensor-1'
     });
 
-    expect(created).toEqual({ sensorAddress: 'sensor-1', enabled: true });
-    expect(disabled).toEqual({ sensorAddress: 'sensor-1', enabled: false });
+    expect(created).toEqual({ sensorId: 'sensor-1', enabled: true });
+    expect(disabled).toEqual({ sensorId: 'sensor-1', enabled: false });
   });
 
   it('maps rws.NewDevices addresses as eligible records', () => {
@@ -36,11 +36,11 @@ describe('keyspace and mapping', () => {
       eventIndex: 1,
       section: 'rws',
       method: 'NewDevices',
-      sensorAddress: 'sensor-eligible'
+      sensorId: 'sensor-eligible'
     });
 
     expect(projected).toEqual({
-      sensorAddress: 'sensor-eligible',
+      sensorId: 'sensor-eligible',
       enabled: true
     });
   });
@@ -52,7 +52,7 @@ describe('keyspace and mapping', () => {
       eventIndex: 2,
       section: 'registry',
       method: 'AuthorizationObserved',
-      sensorAddress: 'sensor-unknown'
+      sensorId: 'sensor-unknown'
     });
 
     expect(projected).toBeNull();

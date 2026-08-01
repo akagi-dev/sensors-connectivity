@@ -5,7 +5,7 @@ export interface SignatureVerificationInput {
   measurements: Record<string, unknown>;
   timestamp: string;
   nonce: string;
-  sensorAddress: string;
+  sensorId: string;
   signature: string;
   signerAddress: string;
 }
@@ -27,7 +27,7 @@ export async function verifyTelemetrySignature(
 ): Promise<boolean> {
   try {
     const canonicalMeasurements = canonicalize(input.measurements);
-    const concatenated = `${canonicalMeasurements}${input.timestamp}${input.nonce}${input.sensorAddress}`;
+    const concatenated = `${canonicalMeasurements}${input.timestamp}${input.nonce}${input.sensorId}`;
 
     return ed25519Verify(
       bytesFromUtf8(concatenated),

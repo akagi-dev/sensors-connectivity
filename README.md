@@ -92,7 +92,7 @@ Available options:
 - `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
 - `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
 
-The CLI now sends authorizer-compatible payloads (`sensor_address`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+The CLI now sends authorizer-compatible payloads (`sensor_id`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
 
 ## Service overview
 

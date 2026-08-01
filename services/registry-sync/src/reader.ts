@@ -4,14 +4,14 @@ import { createRedisKeyspace } from './keyspace.js';
 import { RedisProjectionStore, type RedisLike } from './projection-store.js';
 
 export interface SensorRegistryRecord {
-  sensorAddress: string;
+  sensorId: string;
   enabled: boolean;
 }
 
 export interface RegistryReader {
-  getSensorRecord(sensorAddress: string): Promise<SensorRegistryRecord | null>;
-  isNonceSeen(sensorAddress: string, nonce: string): Promise<boolean>;
-  rememberNonce(sensorAddress: string, nonce: string): Promise<void>;
+  getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null>;
+  isNonceSeen(sensorId: string, nonce: string): Promise<boolean>;
+  rememberNonce(sensorId: string, nonce: string): Promise<void>;
 }
 
 export class InMemoryRegistryReader implements RegistryReader {
@@ -20,20 +20,20 @@ export class InMemoryRegistryReader implements RegistryReader {
 
   constructor(seed: SensorRegistryRecord[] = []) {
     seed.forEach((record) => {
-      this.sensors.set(record.sensorAddress, record);
+      this.sensors.set(record.sensorId, record);
     });
   }
 
-  async getSensorRecord(sensorAddress: string): Promise<SensorRegistryRecord | null> {
-    return this.sensors.get(sensorAddress) ?? null;
+  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
+    return this.sensors.get(sensorId) ?? null;
   }
 
-  async isNonceSeen(sensorAddress: string, nonce: string): Promise<boolean> {
-    return this.seenNonces.has(`${sensorAddress}:${nonce}`);
+  async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
+    return this.seenNonces.has(`${sensorId}:${nonce}`);
   }
 
-  async rememberNonce(sensorAddress: string, nonce: string): Promise<void> {
-    this.seenNonces.add(`${sensorAddress}:${nonce}`);
+  async rememberNonce(sensorId: string, nonce: string): Promise<void> {
+    this.seenNonces.add(`${sensorId}:${nonce}`);
   }
 }
 
@@ -48,24 +48,24 @@ export class RedisRegistryReader implements RegistryReader {
     this.projectionStore = new RedisProjectionStore(redis, createRedisKeyspace(redisKeyPrefix));
   }
 
-  async getSensorRecord(sensorAddress: string): Promise<SensorRegistryRecord | null> {
-    const record = await this.projectionStore.readSensor(sensorAddress);
+  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
+    const record = await this.projectionStore.readSensor(sensorId);
     if (!record) {
       return null;
     }
 
     return {
-      sensorAddress: record.sensorAddress,
+      sensorId: record.sensorId,
       enabled: record.enabled
     };
   }
 
-  async isNonceSeen(sensorAddress: string, nonce: string): Promise<boolean> {
-    return this.projectionStore.isNonceSeen(sensorAddress, nonce);
+  async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
+    return this.projectionStore.isNonceSeen(sensorId, nonce);
   }
 
-  async rememberNonce(sensorAddress: string, nonce: string): Promise<void> {
-    await this.projectionStore.rememberNonce(sensorAddress, nonce, this.nonceTtlSeconds);
+  async rememberNonce(sensorId: string, nonce: string): Promise<void> {
+    await this.projectionStore.rememberNonce(sensorId, nonce, this.nonceTtlSeconds);
   }
 }
 

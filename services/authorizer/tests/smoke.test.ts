@@ -4,7 +4,7 @@ import { InMemoryRegistryReader } from '../../registry-sync/src/reader.js';
 
 describe('authorizer smoke', () => {
   it('returns 403 for unknown sensor, emits rejected event, and exposes health/metrics counters', async () => {
-    const rejectedEvents: Array<{ reason_code: string; sensor_address?: string | undefined }> = [];
+    const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
     const app = createAuthorizerApp({
       registryReader: new InMemoryRegistryReader([]),
       producer: {
@@ -23,7 +23,7 @@ describe('authorizer smoke', () => {
       url: '/v1/telemetry',
       payload: {
         measurements: { temp: 21 },
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: new Date().toISOString(),
         nonce: 'n1',
         signature: '0x00'
@@ -33,7 +33,7 @@ describe('authorizer smoke', () => {
     expect(response.statusCode).toBe(403);
     expect(rejectedEvents).toEqual([
     {
-      sensor_address: 'sensor-1',
+      sensor_id: 'sensor-1',
       reason_code: 'sensor_forbidden',
       reason_message: 'Sensor is unknown or disabled'
     }
@@ -53,7 +53,7 @@ describe('authorizer smoke', () => {
   });
 
   it('returns 401 for stale timestamps before registry/signature checks', async () => {
-    const rejectedEvents: Array<{ reason_code: string; sensor_address?: string | undefined }> = [];
+    const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
     const app = createAuthorizerApp(
       {
         registryReader: new InMemoryRegistryReader([]),
@@ -75,7 +75,7 @@ describe('authorizer smoke', () => {
       url: '/v1/telemetry',
       payload: {
         measurements: { temp: 21 },
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: '2020-01-01T00:00:00Z',
         nonce: 'n1',
         signature: 'AA=='
@@ -86,7 +86,7 @@ describe('authorizer smoke', () => {
     expect(response.json()).toEqual({ status: 'rejected', error_code: 'stale_timestamp' });
     expect(rejectedEvents).toEqual([
       {
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         reason_code: 'stale_timestamp',
         reason_message: 'Timestamp outside allowed skew window'
       }

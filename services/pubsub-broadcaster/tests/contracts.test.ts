@@ -10,7 +10,7 @@ describe('pubsub broadcaster contract compatibility', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'authorizer',
       payload: {
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
         measurements: { temp: 20 },
@@ -31,7 +31,7 @@ describe('pubsub broadcaster contract compatibility', () => {
       payload: {
         status: 'submitted',
         pubsub_topic: 'telemetry/authorized/v1',
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         nonce: 'nonce-1'
       }
     });

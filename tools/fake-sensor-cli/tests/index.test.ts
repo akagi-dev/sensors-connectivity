@@ -7,12 +7,12 @@ describe('fake sensor CLI', () => {
     await cryptoWaitReady();
     const signerSeedHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
     const seed = Buffer.from(signerSeedHex.slice(2), 'hex');
-    const expectedSensorAddress = encodeAddress(ed25519PairFromSeed(seed).publicKey);
+    const expectedSensorId = encodeAddress(ed25519PairFromSeed(seed).publicKey);
 
     const options = parseFakeSensorCliOptions([], {});
     expect(options).toEqual({
       endpointUrl: 'http://localhost:3000/v1/telemetry',
-      sensorAddress: expectedSensorAddress,
+      sensorId: expectedSensorId,
       count: 1,
       intervalMs: 1000,
       signerSeedHex
@@ -31,14 +31,14 @@ describe('fake sensor CLI', () => {
         '0x0101010101010101010101010101010101010101010101010101010101010101'
       ],
       {
-        SENSOR_FAKE_SENSOR_ADDRESS: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
+        SENSOR_FAKE_SENSOR_ID: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
         SENSOR_FAKE_INTERVAL_MS: '250'
       }
     );
 
     expect(options).toEqual({
       endpointUrl: 'http://localhost:4000/v1/telemetry',
-      sensorAddress: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
+      sensorId: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
       count: 3,
       intervalMs: 250,
       signerSeedHex: '0x0101010101010101010101010101010101010101010101010101010101010101',
@@ -48,7 +48,7 @@ describe('fake sensor CLI', () => {
 
   it('creates fake payload with expected shape', () => {
     const payload = createFakePayload('5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt');
-    expect(payload.sensor_address).toBe('5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt');
+    expect(payload.sensor_id).toBe('5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt');
     expect(typeof payload.timestamp).toBe('string');
     expect(typeof payload.nonce).toBe('string');
     expect(typeof payload.measurements.temperature_c).toBe('number');
@@ -59,12 +59,12 @@ describe('fake sensor CLI', () => {
     expect(() => parseFakeSensorCliOptions(['--count', '0'], {})).toThrow('Invalid positive integer value: 0');
   });
 
-  it('throws when sensor address does not match signer seed', () => {
+  it('throws when sensor id does not match signer seed', () => {
     expect(() =>
       parseFakeSensorCliOptions(
-        ['--sensor-address', '5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt'],
+        ['--sensor-id', '5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt'],
         { SENSOR_FAKE_SIGNER_SEED_HEX: '0x0202020202020202020202020202020202020202020202020202020202020202' }
       )
-    ).toThrow('sensor address does not match signer seed');
+    ).toThrow('sensor id does not match signer seed');
   });
 });

@@ -12,7 +12,7 @@ function makeEnvelope(eventId: string): AuthorizedTelemetryEnvelope {
     trace_id: 'trace-1',
     source: 'authorizer',
     payload: {
-      sensor_address: 'sensor-1',
+      sensor_id: 'sensor-1',
       timestamp: '2026-01-01T00:00:00Z',
       nonce: 'nonce-1',
       measurements: { temp: 21 },

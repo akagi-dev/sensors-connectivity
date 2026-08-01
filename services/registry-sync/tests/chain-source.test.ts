@@ -11,7 +11,7 @@ describe('normalizeRegistryEvents', () => {
           method: 'AuthorizationUpdated',
           data: {
             toJSON: () => ({
-              sensor_address: 'sensor-1',
+              sensor_id: 'sensor-1',
               enabled: true
             })
           }
@@ -31,10 +31,10 @@ describe('normalizeRegistryEvents', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationUpdated',
-        sensorAddress: 'sensor-1',
+        sensorId: 'sensor-1',
         enabled: true,
         rawData: {
-          sensor_address: 'sensor-1',
+          sensor_id: 'sensor-1',
           enabled: true
         }
       }
@@ -85,8 +85,8 @@ describe('normalizeRegistryEvents', () => {
 
     const normalized = normalizeRegistryEvents(records as never, 140);
     expect(normalized).toHaveLength(2);
-    expect(normalized[0]?.sensorAddress).toBe(expectedA);
-    expect(normalized[1]?.sensorAddress).toBe(expectedB);
+    expect(normalized[0]?.sensorId).toBe(expectedA);
+    expect(normalized[1]?.sensorId).toBe(expectedB);
     expect(normalized[0]?.enabled).toBe(true);
     expect(normalized[1]?.enabled).toBe(true);
   });

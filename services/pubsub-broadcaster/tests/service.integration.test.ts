@@ -38,7 +38,7 @@ const authorizedMessage = JSON.stringify({
   occurred_at: '2026-01-01T00:00:00Z',
   source: 'authorizer',
   payload: {
-    sensor_address: 'sensor-int',
+    sensor_id: 'sensor-int',
     timestamp: '2026-01-01T00:00:00Z',
     nonce: 'nonce-int',
     measurements: { temp: 25 },

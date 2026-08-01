@@ -178,8 +178,8 @@ export function normalizeRegistryEvents(
         rawData
       };
 
-      if (entry.sensorAddress) {
-        candidate.sensorAddress = entry.sensorAddress;
+      if (entry.sensorId) {
+        candidate.sensorId = entry.sensorId;
       }
       if (typeof entry.enabled === 'boolean') {
         candidate.enabled = entry.enabled;
@@ -253,11 +253,11 @@ function safeToJson(data: { toJSON?: () => unknown; toHuman?: () => unknown }): 
 function extractRegistryEntries(
   raw: unknown,
   normalizedIdentity: string
-): Array<{ sensorAddress?: string; enabled?: boolean }> {
+): Array<{ sensorId?: string; enabled?: boolean }> {
   if (normalizedIdentity === 'rws.newdevices') {
     const addresses = extractDeviceAddresses(raw);
     return addresses.map((address) => ({
-      sensorAddress: address,
+      sensorId: address,
       enabled: true
     }));
   }
@@ -306,17 +306,17 @@ function normalizeRobonomicsAddress(address: string): string {
 }
 
 function extractRegistryFields(raw: unknown): {
-  sensorAddress?: string;
+  sensorId?: string;
   enabled?: boolean;
 } {
-  const sensorAddress =
-    findStringByKey(raw, ['sensorAddress', 'sensor_address', 'sensor', 'device', 'account']) ??
+  const sensorId =
+    findStringByKey(raw, ['sensorId', 'sensor_id', 'sensor', 'device', 'account']) ??
     findStringByPosition(raw, 0);
   const enabled = inferEnabled(raw);
 
-  const result: { sensorAddress?: string; enabled?: boolean } = {};
-  if (sensorAddress) {
-    result.sensorAddress = sensorAddress;
+  const result: { sensorId?: string; enabled?: boolean } = {};
+  if (sensorId) {
+    result.sensorId = sensorId;
   }
   if (typeof enabled === 'boolean') {
     result.enabled = enabled;

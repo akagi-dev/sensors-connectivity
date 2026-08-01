@@ -48,7 +48,7 @@ export async function startIpfsPublisher(): Promise<void> {
     batch_id: `batch-${Date.now()}`,
     events: [
       {
-        sensor_address: 'sensor-dev-1',
+        sensor_id: 'sensor-dev-1',
         timestamp: new Date().toISOString(),
         nonce: 'nonce-dev',
         measurements: { temp: 22 },

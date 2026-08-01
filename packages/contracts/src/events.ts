@@ -3,7 +3,7 @@ import { rfc3339Schema } from './envelope.js';
 
 export const telemetryAuthorizedPayloadSchema = z
   .object({
-    sensor_address: z.string().min(1),
+    sensor_id: z.string().min(1),
     timestamp: rfc3339Schema,
     nonce: z.string().min(1),
     measurements: z.record(z.unknown()),
@@ -14,7 +14,7 @@ export const telemetryAuthorizedPayloadSchema = z
 
 export const telemetryRejectedPayloadSchema = z
   .object({
-    sensor_address: z.string().min(1).optional(),
+    sensor_id: z.string().min(1).optional(),
     reason_code: z.string().min(1),
     reason_message: z.string().min(1).optional(),
     extensions: z.record(z.unknown()).optional()
@@ -33,7 +33,7 @@ export const telemetryPubsubResultPayloadSchema = z
   .object({
     status: z.enum(['submitted', 'failed']),
     pubsub_topic: z.string().min(1),
-    sensor_address: z.string().min(1),
+    sensor_id: z.string().min(1),
     nonce: z.string().min(1),
     error_code: z.string().min(1).optional(),
     error_message: z.string().min(1).optional(),

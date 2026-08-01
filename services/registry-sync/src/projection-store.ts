@@ -71,34 +71,34 @@ return 0
     update: ProjectionUpdate,
     context: Pick<RegistryProjectionRecord, 'updatedAtBlock' | 'updatedAtEvent'>
   ): Promise<void> {
-    await this.redis.hset(this.keyspace.sensorState(update.sensorAddress), {
-      sensor_address: update.sensorAddress,
+    await this.redis.hset(this.keyspace.sensorState(update.sensorId), {
+      sensor_id: update.sensorId,
       enabled: String(update.enabled),
       updated_at_block: String(context.updatedAtBlock),
       updated_at_event: context.updatedAtEvent
     });
   }
 
-  async readSensor(sensorAddress: string): Promise<RegistryProjectionRecord | null> {
-    const entry = await this.redis.hgetall(this.keyspace.sensorState(sensorAddress));
-    if (!entry.sensor_address || !entry.enabled) {
+  async readSensor(sensorId: string): Promise<RegistryProjectionRecord | null> {
+    const entry = await this.redis.hgetall(this.keyspace.sensorState(sensorId));
+    if (!entry.sensor_id || !entry.enabled) {
       return null;
     }
 
     return {
-      sensorAddress: entry.sensor_address,
+      sensorId: entry.sensor_id,
       enabled: entry.enabled === 'true',
       updatedAtBlock: Number.parseInt(entry.updated_at_block ?? '0', 10) || 0,
       updatedAtEvent: entry.updated_at_event ?? ''
     };
   }
 
-  async isNonceSeen(sensorAddress: string, nonce: string): Promise<boolean> {
-    return (await this.redis.exists(this.keyspace.nonceState(sensorAddress, nonce))) === 1;
+  async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
+    return (await this.redis.exists(this.keyspace.nonceState(sensorId, nonce))) === 1;
   }
 
-  async rememberNonce(sensorAddress: string, nonce: string, ttlSeconds: number): Promise<void> {
-    await this.redis.set(this.keyspace.nonceState(sensorAddress, nonce), '1', 'EX', ttlSeconds, 'NX');
+  async rememberNonce(sensorId: string, nonce: string, ttlSeconds: number): Promise<void> {
+    await this.redis.set(this.keyspace.nonceState(sensorId, nonce), '1', 'EX', ttlSeconds, 'NX');
   }
 
   async publishDlq(payload: object): Promise<void> {

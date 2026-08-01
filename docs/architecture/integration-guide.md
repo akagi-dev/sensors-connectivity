@@ -21,7 +21,7 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 ### Endpoint limits and protection
 
 - Max clock skew policy example: `±300s` (see replay section for details).
-- Nonce replay protection scope: `(sensor_address, nonce)`.
+- Nonce replay protection scope: `(sensor_id, nonce)`.
 - Default per-sensor rate limit: `1 request / 10 seconds`.
 - Per-sensor request rate limiting applies; clients MUST handle `429 Too Many Requests`.
 
@@ -39,7 +39,7 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 | Field            | Type                 | Required | Description                                                                                                             |
 | ---------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                           |
-| `sensor_address` | string               | yes      | Robonomics SS58 sensor identity used to resolve public key/authorization state.                                         |
+| `sensor_id` | string               | yes      | Robonomics SS58 sensor identity used to resolve public key/authorization state.                                         |
 | `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
 | `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                        |
 | `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented message bytes. |
@@ -57,7 +57,7 @@ X-Sensor-Zone: eu-west
   "measurements": {
     "temperature_c": 21.4
   },
-  "sensor_address": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
+  "sensor_id": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "0000017a",
   "signature": "Q5cvaM...base64-ed25519-signature...P8="
@@ -80,7 +80,7 @@ X-Sensor-Zone: eu-west
     },
     "tags": ["indoor", "lab-2"]
   },
-  "sensor_address": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
+  "sensor_id": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
   "nonce": "2a5b7c0d-44d1-4b2c-84a1-df2cb14d1f14",
   "signature": "d9j0z2...base64-ed25519-signature...qk="
@@ -105,7 +105,7 @@ X-Sensor-Zone: eu-west
 
 The message bytes to sign MUST be built in this exact order:
 
-`canonical_measurements || timestamp || nonce || sensor_address`
+`canonical_measurements || timestamp || nonce || sensor_id`
 
 Then:
 
@@ -116,9 +116,9 @@ Then:
 ### Signing pseudocode
 
 ```text
-function signTelemetry(measurements, timestamp, nonce, sensorAddress, privateKey):
+function signTelemetry(measurements, timestamp, nonce, sensorId, privateKey):
   canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
-  message = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorAddress)
+  message = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorId)
   sig = substrate_ed25519_sign(privateKey, message) // 64-byte signature
   return base64(sig)
 ```
@@ -128,7 +128,7 @@ function signTelemetry(measurements, timestamp, nonce, sensorAddress, privateKey
 ```text
 function verifyTelemetry(request, publicKey):
   canonical = canonicalJson(request.measurements)
-  message = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_address)
+  message = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_id)
   signatureBytes = base64_decode(request.signature)
   return substrate_ed25519_verify(publicKey, message, signatureBytes)
 ```
@@ -141,7 +141,7 @@ function verifyTelemetry(request, publicKey):
 - Address is not encoded as Robonomics Network address (general substrate encoding).
 - Hashing externally before signing/verifying instead of passing message bytes directly to the Substrate-compatible Ed25519 library.
 - Omitting `timestamp` from the signed message input.
-- Trailing spaces/newlines in `nonce` or `sensor_address`.
+- Trailing spaces/newlines in `nonce` or `sensor_id`.
 - Wrong signature encoding (must be base64 of raw 64-byte signature).
 
 ## Replay and timestamp protection
@@ -154,14 +154,14 @@ function verifyTelemetry(request, publicKey):
 
 ### Nonce uniqueness and retention
 
-- Uniqueness scope: `(sensor_address, nonce)`.
+- Uniqueness scope: `(sensor_id, nonce)`.
 - A nonce accepted once for a sensor MUST be rejected on reuse.
 - Retention guidance: keep nonce records for at least the max timestamp window plus retry horizon (example: `15 minutes`).
 
 ### Expected replay/timestamp failures
 
 - Stale or future timestamp outside skew window: reject.
-- Duplicate nonce for same `sensor_address`: reject as replay.
+- Duplicate nonce for same `sensor_id`: reject as replay.
 
 ## Regional routing and ingestion endpoints
 
@@ -197,7 +197,7 @@ Primary path in every zone: `POST /v1/telemetry`.
 2. On timeout/network failure, sensor MAY retry in the same zone first with exponential backoff.
 3. If configured, sensor MAY fail over to another zone.
 4. During retries/failover, sensor MUST preserve the exact same `nonce` and payload bytes to keep signatures and replay behavior correct.
-5. Backend replay enforcement remains scoped to `(sensor_address, nonce)` and should be synchronized across zones with bounded replication lag.
+5. Backend replay enforcement remains scoped to `(sensor_id, nonce)` and should be synchronized across zones with bounded replication lag.
 
 ### Global endpoint behavior
 
@@ -337,6 +337,6 @@ Example:
 Recommended event correlation metadata fields:
 
 - `event_id`
-- `sensor_address`
+- `sensor_id`
 - `request_id`
 - `zone`

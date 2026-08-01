@@ -28,7 +28,7 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'authorizer',
       payload: {
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
         measurements: { temp: 21.4 },
@@ -51,7 +51,7 @@ describe('contracts', () => {
       telemetryPubsubResultPayloadSchema.parse({
         status: 'submitted',
         pubsub_topic: 'telemetry/authorized/v1',
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         nonce: 'nonce-1'
       })
     ).toBeTruthy();
@@ -102,7 +102,7 @@ describe('contracts', () => {
   it('fails malformed payload', () => {
     expect(() =>
       telemetryAuthorizedPayloadSchema.parse({
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
         measurements: 'invalid',
@@ -130,7 +130,7 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'authorizer',
       payload: {
-        sensor_address: 'sensor-1',
+        sensor_id: 'sensor-1',
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
         measurements: { temp: 21.4 },
