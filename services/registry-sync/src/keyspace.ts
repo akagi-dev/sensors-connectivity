@@ -52,8 +52,7 @@ export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate
 
   const normalizedMethod = `${event.section}.${event.method}`.toLowerCase();
   const explicitEnabled = event.enabled;
-  const isRwsEligibility =
-    normalizedMethod === 'rws.set_devices' || normalizedMethod === 'rws.newdevices';
+  const isRwsEligibility = normalizedMethod === 'rws.newdevices';
   const impliedDisabled =
     normalizedMethod.includes('disable') ||
     normalizedMethod.includes('revoke') ||
