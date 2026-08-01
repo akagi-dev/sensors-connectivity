@@ -207,7 +207,21 @@ function assertDelivery(expected, received) {
       throw new Error(`signature mismatch for nonce ${sent.nonce}`);
     }
 
-    if (JSON.stringify(delivered.measurements) !== JSON.stringify(sent.measurements)) {
+    const normalize = (value) => {
+      if (Array.isArray(value)) {
+        return value.map(normalize);
+      }
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, normalize(value[key])])
+        );
+      }
+      return value;
+    };
+
+    if (JSON.stringify(normalize(delivered.measurements)) !== JSON.stringify(normalize(sent.measurements))) {
       throw new Error(`measurements mismatch for nonce ${sent.nonce}`);
     }
   }
