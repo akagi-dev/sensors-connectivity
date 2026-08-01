@@ -47,10 +47,13 @@ export function logWarn(message: string, context?: Record<string, unknown>): voi
 }
 
 export function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  const normalizedError = error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { message: String(error) };
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: normalizedError
     },
     message
   );
@@ -105,7 +108,7 @@ export function createAuthorizerApp(
         void deps.producer
           .publishRejected(payload, traceId)
           .then((eventId) => {
-            request.log.info({
+            logInfo('telemetry rejected event published', {
               event_id: eventId,
               trace_id: traceId,
               sensor_address: payload.sensor_address,
@@ -113,13 +116,24 @@ export function createAuthorizerApp(
             });
           })
           .catch((error) => {
-            request.log.error(error);
+            logError('failed to publish rejected event', error, {
+              trace_id: traceId,
+              sensor_address: payload.sensor_address,
+              reason_code: payload.reason_code
+            });
           });
 
       const timestampMs = Date.parse(body.timestamp);
       const skewMs = Math.abs(Date.now() - timestampMs);
       if (Number.isNaN(timestampMs) || skewMs > timestampSkewSeconds * 1000) {
         metrics.rejected += 1;
+        logWarn('telemetry rejected due to stale timestamp', {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          timestamp: body.timestamp,
+          skew_ms: Number.isNaN(timestampMs) ? undefined : skewMs,
+          allowed_skew_seconds: timestampSkewSeconds
+        });
         publishRejectedEvent({
           sensor_address: body.sensor_address,
           reason_code: 'stale_timestamp',
@@ -131,6 +145,12 @@ export function createAuthorizerApp(
       const record = await deps.registryReader.getSensorRecord(body.sensor_address);
       if (!record || !record.enabled) {
         metrics.rejected += 1;
+        logWarn('telemetry rejected due to unknown or disabled sensor', {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          sensor_record_found: Boolean(record),
+          sensor_enabled: record?.enabled
+        });
         publishRejectedEvent({
           sensor_address: body.sensor_address,
           reason_code: 'sensor_forbidden',
@@ -142,6 +162,11 @@ export function createAuthorizerApp(
       const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_address, body.nonce);
       if (nonceSeen) {
         metrics.rejected += 1;
+        logWarn('telemetry rejected due to duplicate nonce', {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          nonce: body.nonce
+        });
         publishRejectedEvent({
           sensor_address: body.sensor_address,
           reason_code: 'duplicate_nonce',
@@ -161,6 +186,11 @@ export function createAuthorizerApp(
 
       if (!signatureValid) {
         metrics.rejected += 1;
+        logWarn('telemetry rejected due to invalid signature', {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          nonce: body.nonce
+        });
         publishRejectedEvent({
           sensor_address: body.sensor_address,
           reason_code: 'invalid_signature',
@@ -186,7 +216,11 @@ export function createAuthorizerApp(
       } catch (error) {
         metrics.kafkaErrors += 1;
         metrics.rejected += 1;
-        request.log.error(error);
+        logError('failed to publish authorized telemetry event', error, {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          nonce: body.nonce
+        });
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
       }
 
@@ -194,11 +228,20 @@ export function createAuthorizerApp(
         await deps.registryReader.rememberNonce(body.sensor_address, body.nonce);
       } catch (error) {
         metrics.rejected += 1;
-        request.log.error(error);
+        logError('failed to remember sensor nonce', error, {
+          trace_id: traceId,
+          sensor_address: body.sensor_address,
+          nonce: body.nonce
+        });
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
       }
 
       metrics.accepted += 1;
+      logInfo('telemetry accepted', {
+        trace_id: traceId,
+        sensor_address: body.sensor_address,
+        nonce: body.nonce
+      });
       return reply.code(202).send({ status: 'accepted' });
     }
   );
@@ -208,6 +251,14 @@ export function createAuthorizerApp(
 
 export async function startAuthorizer() {
   const config = loadAuthorizerConfig();
+  logInfo('starting authorizer service', {
+    port: config.port,
+    source: config.source,
+    kafka_broker_count: config.kafkaBrokers.length,
+    timestamp_skew_seconds: config.timestampSkewSeconds,
+    producer_max_attempts: config.producerMaxAttempts,
+    producer_retry_backoff_ms: config.producerRetryBackoffMs
+  });
   const app = createAuthorizerApp({
     registryReader: createRegistryReaderFromEnv(),
     producer: createAuthorizerEventProducer(

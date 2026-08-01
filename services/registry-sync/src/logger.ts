@@ -14,10 +14,13 @@ export function logWarn(message: string, context?: Record<string, unknown>): voi
 }
 
 export function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  const normalizedError = error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { message: String(error) };
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: normalizedError
     },
     message
   );

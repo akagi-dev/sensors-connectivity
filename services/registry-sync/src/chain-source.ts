@@ -1,7 +1,7 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
 import type { RegistryEvent } from './keyspace.js';
-import { logError } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 const ROBONOMICS_SS58_PREFIX = 32;
 
@@ -28,14 +28,21 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
   }
 
   async connect(): Promise<void> {
+    logInfo('connecting to substrate finalized event source', {
+      substrateWsUrl: this.substrateWsUrl
+    });
     this.api = await ApiPromise.create({ provider: this.provider });
     await this.api.isReady;
+    logInfo('connected to substrate finalized event source', {
+      substrateWsUrl: this.substrateWsUrl
+    });
   }
 
   async disconnect(): Promise<void> {
     await this.stop();
     await this.api?.disconnect();
     this.api = null;
+    logInfo('disconnected from substrate finalized event source');
   }
 
   async getLatestFinalizedHeight(): Promise<number> {
@@ -56,11 +63,16 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
     const latestFinalizedHash = await api.rpc.chain.getFinalizedHead();
     const latestFinalizedHeader = await api.rpc.chain.getHeader(latestFinalizedHash);
     const latestFinalizedHeight = latestFinalizedHeader.number.toNumber();
+    logInfo('starting finalized head backfill', {
+      fromInclusiveHeight,
+      latestFinalizedHeight
+    });
 
     for (let height = fromInclusiveHeight; height <= latestFinalizedHeight; height += 1) {
       const hash = await api.rpc.chain.getBlockHash(height);
       const eventsQuery = api.query.system?.events;
       if (!eventsQuery) {
+        logWarn('system.events query unavailable while backfilling', { height });
         continue;
       }
 
@@ -82,6 +94,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
           const eventsQuery = api.query.system?.events;
           if (!eventsQuery) {
+            logWarn('system.events query unavailable on finalized head', { height });
             return;
           }
 
@@ -93,8 +106,13 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
           await onFinalizedHead?.(height);
         })
         .catch((error) => {
-          logError('failed to process finalized head', error);
+          logError('failed to process finalized head', error, {
+            fromInclusiveHeight
+          });
         });
+    });
+    logInfo('subscribed to finalized heads', {
+      fromInclusiveHeight
     });
   }
 

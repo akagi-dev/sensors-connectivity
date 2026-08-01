@@ -10,7 +10,7 @@ import {
   toChainEventId,
   type RegistryEvent
 } from './keyspace.js';
-import { logError, logInfo } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 import { RedisProjectionStore, RedisRetryCounterStore, type RedisLike } from './projection-store.js';
 
 export * from './chain-source.js';
@@ -69,6 +69,13 @@ export function createRegistrySyncService(
 
   async function processEvent(event: RegistryEvent): Promise<void> {
     const eventId = toChainEventId(event);
+    logStructured('processing_registry_event', {
+      eventId,
+      blockHeight: event.blockHeight,
+      eventIndex: event.eventIndex,
+      section: event.section,
+      method: event.method
+    });
     metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, event.blockHeight);
 
     let pending = true;
@@ -158,11 +165,20 @@ export function createRegistrySyncService(
       });
 
       if (result === 'retried') {
+        logStructured('retry_backoff_wait', {
+          eventId,
+          retryBackoffMs: config.retryBackoffMs
+        });
         await sleep(config.retryBackoffMs);
         continue;
       }
 
       if (result === 'dlq') {
+        logWarn('registry event routed to DLQ', {
+          eventId,
+          blockHeight: event.blockHeight,
+          eventIndex: event.eventIndex
+        });
         await projectionStore.commitCursorHeight(event.blockHeight);
         metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
       }
@@ -178,9 +194,21 @@ export function createRegistrySyncService(
       }
 
       started = true;
+      logInfo('starting registry sync service', {
+        substrateWsUrl: config.substrateWsUrl,
+        redisUrl: config.redisUrl,
+        redisKeyPrefix: config.redisKeyPrefix,
+        maxRetries: config.maxRetries,
+        retryBackoffMs: config.retryBackoffMs,
+        healthPort: config.healthPort
+      });
       await eventSource.connect();
       metrics.syncHeight = await projectionStore.loadCursorHeight();
       metrics.latestFinalizedHeight = await eventSource.getLatestFinalizedHeight();
+      logInfo('registry sync cursor loaded', {
+        syncHeight: metrics.syncHeight,
+        latestFinalizedHeight: metrics.latestFinalizedHeight
+      });
 
       if (deps.enableHealthServer ?? true) {
         healthServer = startHealthAndMetricsServer(config.healthPort, metrics);
@@ -211,6 +239,7 @@ export function createRegistrySyncService(
       }
 
       started = false;
+      logInfo('stopping registry sync service');
       await eventSource.stop();
       await eventSource.disconnect();
 
