@@ -72,10 +72,12 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
     });
 
     for (let height = fromInclusiveHeight; height <= latestFinalizedHeight; height += 1) {
-      logDebug('processing backfill finalized block', {
-        height,
-        latestFinalizedHeight
-      });
+      if (height === fromInclusiveHeight || height === latestFinalizedHeight || height % 100 === 0) {
+        logDebug('processing backfill finalized block', {
+          height,
+          latestFinalizedHeight
+        });
+      }
       const hash = await api.rpc.chain.getBlockHash(height);
       const eventsQuery = api.query.system?.events;
       if (!eventsQuery) {

@@ -87,11 +87,11 @@ export function createRegistrySyncService(
     metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, event.blockHeight);
 
     let pending = true;
-    let processingAttempt = 1;
+    let loopAttempt = 1;
     while (pending) {
       logDebug('running consumer processing rule', {
         eventId,
-        attempt: processingAttempt
+        loopAttempt
       });
       const result = await runConsumerProcessingRule(event, {
         retryPolicy: {
