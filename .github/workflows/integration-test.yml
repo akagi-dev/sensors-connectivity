@@ -106,7 +106,7 @@ jobs:
           set -euo pipefail
           mkdir -p logs
 
-          SENSOR_ID="$(node --input-type=module <<'NODE'
+          SENSOR_ID="$(pnpm --filter @scp/authorizer exec node --input-type=module <<'NODE'
           import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
           await cryptoWaitReady();
           const seedHex = (process.env.SENSOR_SIGNER_SEED_HEX ?? '').replace(/^0x/, '');
