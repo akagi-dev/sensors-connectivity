@@ -52,6 +52,8 @@ interface RedisLike {
   hset(key: string, map: Record<string, string>): Promise<number>;
   sadd(key: string, member: string): Promise<number>;
   smembers(key: string): Promise<string[]>;
+  srem(key: string, member: string): Promise<number>;
+  del(key: string): Promise<number>;
   quit?(): Promise<'OK'>;
   disconnect?(): void;
 }
@@ -92,6 +94,7 @@ export function createHeartbeatTrackerState(
   redis: RedisLike,
   redisKeyPrefix: string,
   onlineWindowMs: number,
+  retentionWindowMs: number,
   now: () => number = Date.now
 ): HeartbeatTrackerState {
   const keyspace = createHeartbeatTrackerKeyspace(redisKeyPrefix);
@@ -129,6 +132,8 @@ export function createHeartbeatTrackerState(
         sensorIds.map((sensorId) => redis.hgetall(keyspace.sensor(sensorId)))
       );
 
+      const staleSensorIds: string[] = [];
+
       for (let i = 0; i < sensorIds.length; i++) {
         const sensorId = sensorIds[i];
         const heartbeat = heartbeats[i];
@@ -141,6 +146,12 @@ export function createHeartbeatTrackerState(
         const secondsSinceLastSeen = Math.max(0, (currentTime - lastSeen) / 1000);
         const online = currentTime - lastSeen <= onlineWindowMs;
         const uptimeSeconds = online ? Math.max(0, (currentTime - onlineSince) / 1000) : 0;
+
+        // Mark sensor as stale if not seen within retention window
+        if (currentTime - lastSeen > retentionWindowMs) {
+          staleSensorIds.push(sensorId);
+          continue;
+        }
 
         if (online) {
           uptimeMap[sensorId] = uptimeSeconds;
@@ -157,6 +168,16 @@ export function createHeartbeatTrackerState(
         });
       }
 
+      // Prune stale sensors from Redis
+      if (staleSensorIds.length > 0) {
+        await Promise.all(
+          staleSensorIds.map(async (sensorId) => {
+            await redis.srem(keyspace.sensors, sensorId);
+            await redis.del(keyspace.sensor(sensorId));
+          })
+        );
+      }
+
       const sensorsOnline = onlineUptimes.length;
       const maxUptimeSeconds = sensorsOnline > 0 ? Math.max(...onlineUptimes) : 0;
       const avgUptimeSeconds =
@@ -166,7 +187,7 @@ export function createHeartbeatTrackerState(
 
       return {
         sensors_online: sensorsOnline,
-        sensors_total_tracked: sensorIds.length,
+        sensors_total_tracked: sensorIds.length - staleSensorIds.length,
         online_window_ms: onlineWindowMs,
         consumed,
         sensor_uptime_seconds: uptimeMap,
@@ -219,7 +240,13 @@ export function createHeartbeatTrackerService(
   const RedisClient = Redis as unknown as RedisConstructor;
   const redis = deps.redis ?? new RedisClient(config.redisUrl);
   const createHealthServer = deps.createHealthServer ?? startHealthAndMetricsServer;
-  const tracker = createHeartbeatTrackerState(redis, config.redisKeyPrefix, config.onlineWindowMs, deps.now ?? Date.now);
+  const tracker = createHeartbeatTrackerState(
+    redis,
+    config.redisKeyPrefix,
+    config.onlineWindowMs,
+    config.retentionWindowMs,
+    deps.now ?? Date.now
+  );
 
   let started = false;
   let runPromise: Promise<void> | null = null;

@@ -57,12 +57,28 @@ class FakeRedis {
   async smembers(key: string): Promise<string[]> {
     return [...(this.sets.get(key) ?? new Set<string>())];
   }
+
+  async srem(key: string, member: string): Promise<number> {
+    const set = this.sets.get(key);
+    if (!set) return 0;
+    const deleted = set.delete(member) ? 1 : 0;
+    if (set.size === 0) {
+      this.sets.delete(key);
+    }
+    return deleted;
+  }
+
+  async del(key: string): Promise<number> {
+    const existed = this.hashes.has(key) ? 1 : 0;
+    this.hashes.delete(key);
+    return existed;
+  }
 }
 
 describe('heartbeat tracker state', () => {
   it('counts a sensor online right after an authorized message', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
@@ -75,7 +91,7 @@ describe('heartbeat tracker state', () => {
 
   it('drops sensor from online count once time passes the window', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
@@ -89,7 +105,7 @@ describe('heartbeat tracker state', () => {
   it('recomputes online count correctly across multiple sensors', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage(authorizedEnvelope('sensor-a'), tracker, consumed);
@@ -111,7 +127,7 @@ describe('heartbeat tracker state', () => {
   it('keeps onlineSince stable within window and resets after large gap', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
@@ -132,7 +148,7 @@ describe('heartbeat tracker state', () => {
   it('computes uptime aggregates and returns avg 0 when none are online', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage(authorizedEnvelope('sensor-a'), tracker, consumed);
@@ -153,7 +169,7 @@ describe('heartbeat tracker state', () => {
 
   it('ignores invalid and non-authorized envelopes', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, clock.now);
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
     const consumed = { value: 0 };
 
     await handleTelemetryMessage('not-json', tracker, consumed);
@@ -177,5 +193,35 @@ describe('heartbeat tracker state', () => {
     expect(consumed.value).toBe(0);
     expect(metrics.sensors_total_tracked).toBe(0);
     expect(metrics.sensors_online).toBe(0);
+  });
+
+  it('prunes sensors not seen within retention window', async () => {
+    const base = Date.parse('2026-01-01T00:00:00Z');
+    const clock = createClock(base);
+    const onlineWindowMs = 30000;
+    const retentionWindowMs = 300000; // 5 minutes
+    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', onlineWindowMs, retentionWindowMs, clock.now);
+    const consumed = { value: 0 };
+
+    // Add two sensors
+    await handleTelemetryMessage(authorizedEnvelope('sensor-old'), tracker, consumed);
+    clock.set(base + 10000);
+    await handleTelemetryMessage(authorizedEnvelope('sensor-recent'), tracker, consumed);
+
+    // Verify both are tracked
+    let metrics = await tracker.createMetrics(consumed.value);
+    expect(metrics.sensors_total_tracked).toBe(2);
+    expect(metrics.sensors_online).toBe(2);
+
+    // Move time beyond retention window for sensor-old, but keep sensor-recent within retention
+    clock.set(base + retentionWindowMs + 1000);
+    await handleTelemetryMessage(authorizedEnvelope('sensor-recent'), tracker, consumed);
+
+    // Check metrics - sensor-old should be pruned
+    metrics = await tracker.createMetrics(consumed.value);
+    expect(metrics.sensors_total_tracked).toBe(1);
+    expect(metrics.sensors_online).toBe(1);
+    expect(metrics.sensors_uptime.length).toBe(1);
+    expect(metrics.sensors_uptime[0].sensor_id).toBe('sensor-recent');
   });
 });
