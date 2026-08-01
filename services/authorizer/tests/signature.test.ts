@@ -1,18 +1,17 @@
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
-import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { canonicalize } from 'json-canonicalize';
 import { verifyTelemetrySignature } from '../src/signature.js';
 
-function telemetryHashHex(
+function telemetryMessageBytes(
   measurements: Record<string, unknown>,
   timestamp: string,
   nonce: string,
   sensorAddress: string
-): string {
+): Uint8Array {
   const canonicalMeasurements = canonicalize(measurements);
   const concatenated = `${canonicalMeasurements}${timestamp}${nonce}${sensorAddress}`;
-  return createHash('sha512').update(new TextEncoder().encode(concatenated)).digest('hex');
+  return new TextEncoder().encode(concatenated);
 }
 
 describe('verifyTelemetrySignature', () => {
@@ -25,8 +24,8 @@ describe('verifyTelemetrySignature', () => {
     const timestamp = '2026-01-01T00:00:00Z';
     const nonce = 'nonce-1';
     const sensorAddress = signerAddress;
-    const hashHex = telemetryHashHex(measurements, timestamp, nonce, sensorAddress);
-    const signatureBytes = ed25519Sign(Buffer.from(hashHex, 'hex'), pair);
+    const messageBytes = telemetryMessageBytes(measurements, timestamp, nonce, sensorAddress);
+    const signatureBytes = ed25519Sign(messageBytes, pair);
 
     await expect(
       verifyTelemetrySignature({
@@ -34,7 +33,7 @@ describe('verifyTelemetrySignature', () => {
         timestamp,
         nonce,
         sensorAddress,
-        signature: `0x${Buffer.from(signatureBytes).toString('hex')}`,
+        signature: Buffer.from(signatureBytes).toString('base64'),
         signerAddress
       })
     ).resolves.toBe(true);
@@ -46,8 +45,8 @@ describe('verifyTelemetrySignature', () => {
     const pair = ed25519PairFromSeed(seed);
     const signerAddress = encodeAddress(pair.publicKey, 32);
     const measurements = { temp: 21 };
-    const hashHex = telemetryHashHex(measurements, '2026-01-01T00:00:00Z', 'nonce-1', signerAddress);
-    const signatureBytes = ed25519Sign(Buffer.from(hashHex, 'hex'), pair);
+    const messageBytes = telemetryMessageBytes(measurements, '2026-01-01T00:00:00Z', 'nonce-1', signerAddress);
+    const signatureBytes = ed25519Sign(messageBytes, pair);
 
     await expect(
       verifyTelemetrySignature({
@@ -55,7 +54,7 @@ describe('verifyTelemetrySignature', () => {
         timestamp: '2026-01-01T00:00:01Z',
         nonce: 'nonce-1',
         sensorAddress: signerAddress,
-        signature: `0x${Buffer.from(signatureBytes).toString('hex')}`,
+        signature: Buffer.from(signatureBytes).toString('base64'),
         signerAddress
       })
     ).resolves.toBe(false);
@@ -68,7 +67,7 @@ describe('verifyTelemetrySignature', () => {
         timestamp: '2026-01-01T00:00:00Z',
         nonce: 'nonce-1',
         sensorAddress: '5FHneW46xGXgs5mUiveU4sbTyGBzmstN5fJQw6QvP5M4Xv4H',
-        signature: '0x00',
+        signature: 'AA==',
         signerAddress: 'not-a-ss58-address'
       })
     ).resolves.toBe(false);

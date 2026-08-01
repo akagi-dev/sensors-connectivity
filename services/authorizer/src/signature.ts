@@ -1,5 +1,4 @@
 import { decodeAddress, ed25519Verify } from '@polkadot/util-crypto';
-import { createHash } from 'node:crypto';
 import { canonicalize } from 'json-canonicalize';
 
 export interface SignatureVerificationInput {
@@ -15,13 +14,12 @@ function bytesFromUtf8(input: string): Uint8Array {
   return new TextEncoder().encode(input);
 }
 
-function bytesFromHex(input: string): Uint8Array {
-  const normalized = input.startsWith('0x') ? input.slice(2) : input;
-  if (normalized.length === 0 || normalized.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(normalized)) {
-    throw new Error('Expected even-length hex input');
+function bytesFromBase64(input: string): Uint8Array {
+  const normalized = input.trim();
+  if (normalized.length === 0) {
+    throw new Error('Expected non-empty base64 input');
   }
-  const pairs = normalized.match(/.{1,2}/g) ?? [];
-  return new Uint8Array(pairs.map((pair) => Number.parseInt(pair, 16)));
+  return Uint8Array.from(Buffer.from(normalized, 'base64'));
 }
 
 export async function verifyTelemetrySignature(
@@ -30,14 +28,10 @@ export async function verifyTelemetrySignature(
   try {
     const canonicalMeasurements = canonicalize(input.measurements);
     const concatenated = `${canonicalMeasurements}${input.timestamp}${input.nonce}${input.sensorAddress}`;
-    const dataHashHex = createHash('sha512')
-      .update(bytesFromUtf8(concatenated))
-      .digest('hex');
 
-    // Documented verification path: canonicalize -> concat -> SHA-512 -> Ed25519 verify.
     return ed25519Verify(
-      bytesFromHex(dataHashHex),
-      bytesFromHex(input.signature),
+      bytesFromUtf8(concatenated),
+      bytesFromBase64(input.signature),
       decodeAddress(input.signerAddress)
     );
   } catch {
