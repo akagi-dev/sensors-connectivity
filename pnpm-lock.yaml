@@ -110,6 +110,9 @@ importers:
       '@scp/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      ioredis:
+        specifier: ^5.6.1
+        version: 5.11.1
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4

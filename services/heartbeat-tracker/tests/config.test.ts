@@ -6,11 +6,23 @@ describe('heartbeat tracker config', () => {
     const config = loadHeartbeatTrackerConfig({});
 
     expect(config.onlineWindowMs).toBe(30000);
+    expect(config.redisUrl).toBe('redis://localhost:6379');
+    expect(config.redisKeyPrefix).toBe('heartbeat-tracker:v1');
   });
 
   it('respects HEARTBEAT_TRACKER_ONLINE_WINDOW_MS override', () => {
     const config = loadHeartbeatTrackerConfig({ HEARTBEAT_TRACKER_ONLINE_WINDOW_MS: '45000' });
 
     expect(config.onlineWindowMs).toBe(45000);
+  });
+
+  it('respects HEARTBEAT_TRACKER_REDIS_PREFIX override', () => {
+    const config = loadHeartbeatTrackerConfig({
+      REDIS_URL: 'redis://redis.internal:6379',
+      HEARTBEAT_TRACKER_REDIS_PREFIX: 'heartbeat-tracker:prod'
+    });
+
+    expect(config.redisUrl).toBe('redis://redis.internal:6379');
+    expect(config.redisKeyPrefix).toBe('heartbeat-tracker:prod');
   });
 });

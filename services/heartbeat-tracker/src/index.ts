@@ -4,6 +4,7 @@ import {
   type Envelope,
   type TelemetryAuthorizedPayload
 } from '@scp/contracts';
+import Redis from 'ioredis';
 import { Kafka, type Consumer } from 'kafkajs';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -28,27 +29,31 @@ interface HeartbeatTrackerMetrics {
   avg_uptime_seconds: number;
 }
 
-interface SensorHeartbeat {
-  firstSeen: number;
-  lastSeen: number;
-  onlineSince: number;
-}
-
 export interface HeartbeatTrackerService {
   start(): Promise<void>;
   stop(): Promise<void>;
-  getMetrics(): Readonly<HeartbeatTrackerMetrics>;
+  getMetrics(): Promise<Readonly<HeartbeatTrackerMetrics>>;
 }
 
 export interface HeartbeatTrackerState {
-  recordAuthorizedSensor(sensorId: string): void;
-  createMetrics(consumed: number): HeartbeatTrackerMetrics;
+  recordAuthorizedSensor(sensorId: string): Promise<void>;
+  createMetrics(consumed: number): Promise<HeartbeatTrackerMetrics>;
 }
 
 interface HeartbeatTrackerDeps {
   createConsumer?: () => Consumer;
-  createHealthServer?: (getMetrics: () => HeartbeatTrackerMetrics, port: number) => Server;
+  createHealthServer?: (getMetrics: () => Promise<HeartbeatTrackerMetrics>, port: number) => Server;
+  redis?: RedisLike;
   now?: () => number;
+}
+
+interface RedisLike {
+  hgetall(key: string): Promise<Record<string, string>>;
+  hset(key: string, map: Record<string, string>): Promise<number>;
+  sadd(key: string, member: string): Promise<number>;
+  smembers(key: string): Promise<string[]>;
+  quit?(): Promise<'OK'>;
+  disconnect?(): void;
 }
 
 const logger = pino({
@@ -74,41 +79,63 @@ function logError(message: string, error: unknown, context?: Record<string, unkn
   );
 }
 
+type RedisConstructor = new (url: string) => RedisLike;
+
+function createHeartbeatTrackerKeyspace(prefix: string) {
+  return {
+    sensors: `${prefix}:sensors`,
+    sensor: (sensorId: string) => `${prefix}:sensor:${sensorId}`
+  };
+}
+
 export function createHeartbeatTrackerState(
+  redis: RedisLike,
+  redisKeyPrefix: string,
   onlineWindowMs: number,
   now: () => number = Date.now
 ): HeartbeatTrackerState {
-  const sensors = new Map<string, SensorHeartbeat>();
+  const keyspace = createHeartbeatTrackerKeyspace(redisKeyPrefix);
 
   return {
-    recordAuthorizedSensor(sensorId: string): void {
+    async recordAuthorizedSensor(sensorId: string): Promise<void> {
       const observedAt = now();
-      const existing = sensors.get(sensorId);
-      if (!existing) {
-        sensors.set(sensorId, {
-          firstSeen: observedAt,
-          lastSeen: observedAt,
-          onlineSince: observedAt
-        });
-        return;
+      const key = keyspace.sensor(sensorId);
+      const existing = await redis.hgetall(key);
+      const existingLastSeen = Number.parseInt(existing.lastSeen ?? '', 10);
+      const existingOnlineSince = Number.parseInt(existing.onlineSince ?? '', 10);
+      const existingFirstSeen = Number.parseInt(existing.firstSeen ?? '', 10);
+      const hasExisting = Number.isFinite(existingLastSeen);
+
+      let onlineSince = Number.isFinite(existingOnlineSince) ? existingOnlineSince : observedAt;
+      if (hasExisting && observedAt - existingLastSeen > onlineWindowMs) {
+        onlineSince = observedAt;
       }
 
-      if (observedAt - existing.lastSeen > onlineWindowMs) {
-        existing.onlineSince = observedAt;
-      }
-
-      existing.lastSeen = observedAt;
+      await redis.hset(key, {
+        firstSeen: String(Number.isFinite(existingFirstSeen) ? existingFirstSeen : observedAt),
+        lastSeen: String(observedAt),
+        onlineSince: String(onlineSince)
+      });
+      await redis.sadd(keyspace.sensors, sensorId);
     },
-    createMetrics(consumed: number): HeartbeatTrackerMetrics {
+    async createMetrics(consumed: number): Promise<HeartbeatTrackerMetrics> {
       const currentTime = now();
       const uptimeMap: Record<string, number> = {};
       const details: HeartbeatTrackerMetrics['sensors_uptime'] = [];
       const onlineUptimes: number[] = [];
+      const sensorIds = await redis.smembers(keyspace.sensors);
 
-      for (const [sensorId, heartbeat] of sensors.entries()) {
-        const secondsSinceLastSeen = Math.max(0, (currentTime - heartbeat.lastSeen) / 1000);
-        const online = currentTime - heartbeat.lastSeen <= onlineWindowMs;
-        const uptimeSeconds = online ? Math.max(0, (currentTime - heartbeat.onlineSince) / 1000) : 0;
+      for (const sensorId of sensorIds) {
+        const heartbeat = await redis.hgetall(keyspace.sensor(sensorId));
+        const firstSeen = Number.parseInt(heartbeat.firstSeen ?? '', 10);
+        const lastSeen = Number.parseInt(heartbeat.lastSeen ?? '', 10);
+        const onlineSince = Number.parseInt(heartbeat.onlineSince ?? '', 10);
+        if (!Number.isFinite(firstSeen) || !Number.isFinite(lastSeen) || !Number.isFinite(onlineSince)) {
+          continue;
+        }
+        const secondsSinceLastSeen = Math.max(0, (currentTime - lastSeen) / 1000);
+        const online = currentTime - lastSeen <= onlineWindowMs;
+        const uptimeSeconds = online ? Math.max(0, (currentTime - onlineSince) / 1000) : 0;
 
         if (online) {
           uptimeMap[sensorId] = uptimeSeconds;
@@ -118,8 +145,8 @@ export function createHeartbeatTrackerState(
         details.push({
           sensor_id: sensorId,
           online,
-          first_seen: new Date(heartbeat.firstSeen).toISOString(),
-          last_seen: new Date(heartbeat.lastSeen).toISOString(),
+          first_seen: new Date(firstSeen).toISOString(),
+          last_seen: new Date(lastSeen).toISOString(),
           uptime_seconds: uptimeSeconds,
           seconds_since_last_seen: secondsSinceLastSeen
         });
@@ -134,7 +161,7 @@ export function createHeartbeatTrackerState(
 
       return {
         sensors_online: sensorsOnline,
-        sensors_total_tracked: sensors.size,
+        sensors_total_tracked: sensorIds.length,
         online_window_ms: onlineWindowMs,
         consumed,
         sensor_uptime_seconds: uptimeMap,
@@ -150,22 +177,22 @@ export function handleTelemetryMessage(
   raw: string,
   tracker: HeartbeatTrackerState,
   consumed: { value: number }
-): void {
+): Promise<void> {
   const parsed = safeJsonParse(raw);
   if (!parsed.success) {
     logWarn('invalid JSON message ignored', { reason: parsed.error });
-    return;
+    return Promise.resolve();
   }
 
   const envelopeResult = validateEnvelopeWithKnownPayload(parsed.data);
   if (!envelopeResult.success) {
     logWarn('invalid envelope ignored', { reason: envelopeResult.error.message });
-    return;
+    return Promise.resolve();
   }
 
   if (envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
     logWarn('non-authorized envelope ignored', { eventType: envelopeResult.data.event_type });
-    return;
+    return Promise.resolve();
   }
 
   const envelope = envelopeResult.data as Envelope & {
@@ -173,8 +200,9 @@ export function handleTelemetryMessage(
     payload: TelemetryAuthorizedPayload;
   };
 
-  tracker.recordAuthorizedSensor(envelope.payload.sensor_id);
-  consumed.value += 1;
+  return tracker.recordAuthorizedSensor(envelope.payload.sensor_id).then(() => {
+    consumed.value += 1;
+  });
 }
 
 export function createHeartbeatTrackerService(
@@ -183,15 +211,17 @@ export function createHeartbeatTrackerService(
 ): HeartbeatTrackerService {
   const kafka = new Kafka({ clientId: 'heartbeat-tracker', brokers: config.kafkaBrokers });
   const consumer = deps.createConsumer?.() ?? kafka.consumer({ groupId: config.consumerGroupId });
+  const RedisClient = Redis as unknown as RedisConstructor;
+  const redis = deps.redis ?? new RedisClient(config.redisUrl);
   const createHealthServer = deps.createHealthServer ?? startHealthAndMetricsServer;
-  const tracker = createHeartbeatTrackerState(config.onlineWindowMs, deps.now ?? Date.now);
+  const tracker = createHeartbeatTrackerState(redis, config.redisKeyPrefix, config.onlineWindowMs, deps.now ?? Date.now);
 
   let started = false;
   let runPromise: Promise<void> | null = null;
   let healthServer: Server | null = null;
   const consumed = { value: 0 };
 
-  const getMetrics = (): HeartbeatTrackerMetrics => tracker.createMetrics(consumed.value);
+  const getMetrics = async (): Promise<HeartbeatTrackerMetrics> => tracker.createMetrics(consumed.value);
 
   return {
     async start(): Promise<void> {
@@ -206,6 +236,8 @@ export function createHeartbeatTrackerService(
         kafkaBrokers: config.kafkaBrokers,
         healthPort: config.healthPort,
         onlineWindowMs: config.onlineWindowMs,
+        redisUrl: config.redisUrl,
+        redisKeyPrefix: config.redisKeyPrefix,
         source: config.source
       });
 
@@ -216,7 +248,7 @@ export function createHeartbeatTrackerService(
 
         runPromise = consumer.run({
           eachMessage: async ({ message, partition, topic }) => {
-            handleTelemetryMessage(message.value?.toString('utf8') ?? '', tracker, consumed);
+            await handleTelemetryMessage(message.value?.toString('utf8') ?? '', tracker, consumed);
             logInfo('message observed', { topic, partition, offset: message.offset, consumed: consumed.value });
           }
         });
@@ -236,6 +268,11 @@ export function createHeartbeatTrackerService(
         }
 
         await consumer.disconnect();
+        if (typeof redis.quit === 'function') {
+          await redis.quit();
+        } else if (typeof redis.disconnect === 'function') {
+          redis.disconnect();
+        }
         logInfo('startup rollback complete');
         throw error;
       }
@@ -250,6 +287,11 @@ export function createHeartbeatTrackerService(
       logInfo('stopping service');
       await consumer.stop();
       await consumer.disconnect();
+      if (typeof redis.quit === 'function') {
+        await redis.quit();
+      } else if (typeof redis.disconnect === 'function') {
+        redis.disconnect();
+      }
       if (healthServer) {
         await new Promise<void>((resolve, reject) => {
           healthServer?.close((error) => {
@@ -266,17 +308,17 @@ export function createHeartbeatTrackerService(
       runPromise = null;
       logInfo('service stopped');
     },
-    getMetrics(): Readonly<HeartbeatTrackerMetrics> {
+    getMetrics(): Promise<Readonly<HeartbeatTrackerMetrics>> {
       return getMetrics();
     }
   };
 }
 
 export function startHealthAndMetricsServer(
-  getMetrics: () => HeartbeatTrackerMetrics,
+  getMetrics: () => Promise<HeartbeatTrackerMetrics>,
   port: number
 ): Server {
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     if (request.url === '/health') {
       response.statusCode = 200;
       response.setHeader('content-type', 'application/json; charset=utf-8');
@@ -285,9 +327,17 @@ export function startHealthAndMetricsServer(
     }
 
     if (request.url === '/metrics') {
-      response.statusCode = 200;
-      response.setHeader('content-type', 'application/json; charset=utf-8');
-      response.end(JSON.stringify(getMetrics()));
+      try {
+        const metrics = await getMetrics();
+        response.statusCode = 200;
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        response.end(JSON.stringify(metrics));
+      } catch (error) {
+        response.statusCode = 500;
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        response.end(JSON.stringify({ error: 'failed to collect metrics' }));
+        logError('failed to collect metrics', error);
+      }
       return;
     }
 

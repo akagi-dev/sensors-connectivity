@@ -1,6 +1,6 @@
 # `@scp/heartbeat-tracker`
 
-Observability consumer for trusted `telemetry.authorized.v1` events. It tracks sensor liveness and uptime in-memory and exposes metrics over HTTP.
+Observability consumer for trusted `telemetry.authorized.v1` events. It tracks sensor liveness and uptime in Redis and exposes metrics over HTTP.
 
 ## Online and uptime definitions
 
@@ -16,6 +16,8 @@ Observability consumer for trusted `telemetry.authorized.v1` events. It tracks s
 - `HEARTBEAT_TRACKER_SOURCE` (default: `heartbeat-tracker`)
 - `HEARTBEAT_TRACKER_HEALTH_PORT` (default: `3030`)
 - `HEARTBEAT_TRACKER_ONLINE_WINDOW_MS` (default: `30000`)
+- `REDIS_URL` (default: `redis://localhost:6379`)
+- `HEARTBEAT_TRACKER_REDIS_PREFIX` (default: `heartbeat-tracker:v1`)
 
 ## Endpoints
 
