@@ -70,9 +70,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   const derivedAddress = encodeAddress(signer.publicKey);
   const sensorAddress =
     argValues.get('sensor-address') ??
-    argValues.get('sensor-id') ??
     env.SENSOR_FAKE_SENSOR_ADDRESS ??
-    env.SENSOR_FAKE_SENSOR_ID ??
     derivedAddress;
 
   if (sensorAddress !== derivedAddress) {

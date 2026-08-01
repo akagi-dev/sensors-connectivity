@@ -7,7 +7,7 @@ describe('fake sensor CLI', () => {
     await cryptoWaitReady();
     const signerSeedHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
     const seed = Buffer.from(signerSeedHex.slice(2), 'hex');
-    const expectedSensorAddress = encodeAddress(ed25519PairFromSeed(seed).publicKey, 32);
+    const expectedSensorAddress = encodeAddress(ed25519PairFromSeed(seed).publicKey);
 
     const options = parseFakeSensorCliOptions([], {});
     expect(options).toEqual({
@@ -31,7 +31,7 @@ describe('fake sensor CLI', () => {
         '0x0101010101010101010101010101010101010101010101010101010101010101'
       ],
       {
-        SENSOR_FAKE_SENSOR_ID: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
+        SENSOR_FAKE_SENSOR_ADDRESS: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
         SENSOR_FAKE_INTERVAL_MS: '250'
       }
     );
