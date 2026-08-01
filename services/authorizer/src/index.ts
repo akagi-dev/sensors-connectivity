@@ -42,6 +42,10 @@ export function logInfo(message: string, context?: Record<string, unknown>): voi
   logger.info(context ?? {}, message);
 }
 
+export function logDebug(message: string, context?: Record<string, unknown>): void {
+  logger.debug(context ?? {}, message);
+}
+
 export function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
@@ -104,6 +108,12 @@ export function createAuthorizerApp(
     async (request, reply) => {
       const body = telemetryRequestSchema.parse(request.body);
       const traceId = request.headers['x-request-id']?.toString() ?? request.id;
+      logInfo('telemetry request received', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        timestamp: body.timestamp,
+        nonce: body.nonce
+      });
       const publishRejectedEvent = (payload: TelemetryRejectedPayload) =>
         void deps.producer
           .publishRejected(payload, traceId)
@@ -123,6 +133,10 @@ export function createAuthorizerApp(
             });
           });
 
+      logDebug('validating telemetry timestamp', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id
+      });
       const timestampMs = Date.parse(body.timestamp);
       const skewMs = Math.abs(Date.now() - timestampMs);
       if (Number.isNaN(timestampMs) || skewMs > timestampSkewSeconds * 1000) {
@@ -141,7 +155,17 @@ export function createAuthorizerApp(
         });
         return reply.code(401).send({ status: 'rejected', error_code: 'stale_timestamp' });
       }
+      logDebug('telemetry timestamp accepted', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        skew_ms: skewMs,
+        allowed_skew_seconds: timestampSkewSeconds
+      });
 
+      logDebug('loading sensor record', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id
+      });
       const record = await deps.registryReader.getSensorRecord(body.sensor_id);
       if (!record || !record.enabled) {
         metrics.rejected += 1;
@@ -158,7 +182,17 @@ export function createAuthorizerApp(
         });
         return reply.code(403).send({ status: 'rejected', error_code: 'sensor_forbidden' });
       }
+      logDebug('sensor record accepted', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        sensor_enabled: record.enabled
+      });
 
+      logDebug('checking nonce replay protection', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        nonce: body.nonce
+      });
       const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_id, body.nonce);
       if (nonceSeen) {
         metrics.rejected += 1;
@@ -174,7 +208,17 @@ export function createAuthorizerApp(
         });
         return reply.code(409).send({ status: 'rejected', error_code: 'duplicate_nonce' });
       }
+      logDebug('nonce accepted', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        nonce: body.nonce
+      });
 
+      logDebug('verifying telemetry signature', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        nonce: body.nonce
+      });
       const signatureValid = await verifyTelemetrySignature({
         measurements: body.measurements,
         timestamp: body.timestamp,
@@ -198,8 +242,18 @@ export function createAuthorizerApp(
         });
         return reply.code(401).send({ status: 'rejected', error_code: 'invalid_signature' });
       }
+      logDebug('signature accepted', {
+        trace_id: traceId,
+        sensor_id: body.sensor_id,
+        nonce: body.nonce
+      });
 
       try {
+        logDebug('publishing authorized telemetry event', {
+          trace_id: traceId,
+          sensor_id: body.sensor_id,
+          nonce: body.nonce
+        });
         const eventId = await deps.producer.publishAuthorized({
           sensor_id: body.sensor_id,
           timestamp: body.timestamp,
@@ -207,7 +261,7 @@ export function createAuthorizerApp(
           measurements: body.measurements,
           signature: body.signature
         }, traceId);
-        request.log.info({
+        logInfo('authorized telemetry event published', {
           event_id: eventId,
           trace_id: traceId,
           sensor_id: body.sensor_id,
@@ -225,6 +279,11 @@ export function createAuthorizerApp(
       }
 
       try {
+        logDebug('remembering accepted nonce', {
+          trace_id: traceId,
+          sensor_id: body.sensor_id,
+          nonce: body.nonce
+        });
         await deps.registryReader.rememberNonce(body.sensor_id, body.nonce);
       } catch (error) {
         metrics.rejected += 1;

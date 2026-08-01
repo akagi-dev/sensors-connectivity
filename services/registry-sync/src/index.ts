@@ -10,7 +10,7 @@ import {
   toChainEventId,
   type RegistryEvent
 } from './keyspace.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 import { RedisProjectionStore, RedisRetryCounterStore, type RedisLike } from './projection-store.js';
 
 export * from './chain-source.js';
@@ -69,6 +69,14 @@ export function createRegistrySyncService(
 
   async function processEvent(event: RegistryEvent): Promise<void> {
     const eventId = toChainEventId(event);
+    logDebug('processing registry event', {
+      eventId,
+      blockHeight: event.blockHeight,
+      eventIndex: event.eventIndex,
+      section: event.section,
+      method: event.method,
+      sensorId: event.sensorId
+    });
     logStructured('processing_registry_event', {
       eventId,
       blockHeight: event.blockHeight,
@@ -79,7 +87,12 @@ export function createRegistrySyncService(
     metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, event.blockHeight);
 
     let pending = true;
+    let processingAttempt = 1;
     while (pending) {
+      logDebug('running consumer processing rule', {
+        eventId,
+        attempt: processingAttempt
+      });
       const result = await runConsumerProcessingRule(event, {
         retryPolicy: {
           maxAttempts: config.maxRetries,
@@ -165,11 +178,16 @@ export function createRegistrySyncService(
       });
 
       if (result === 'retried') {
+        logDebug('consumer processing requested retry', {
+          eventId,
+          attempt: processingAttempt
+        });
         logStructured('retry_backoff_wait', {
           eventId,
           retryBackoffMs: config.retryBackoffMs
         });
         await sleep(config.retryBackoffMs);
+        processingAttempt += 1;
         continue;
       }
 
@@ -183,6 +201,12 @@ export function createRegistrySyncService(
         metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
       }
 
+      logDebug('registry event processing completed', {
+        eventId,
+        result,
+        syncHeight: metrics.syncHeight,
+        latestFinalizedHeight: metrics.latestFinalizedHeight
+      });
       pending = false;
     }
   }
@@ -203,6 +227,7 @@ export function createRegistrySyncService(
         healthPort: config.healthPort
       });
       await eventSource.connect();
+      logDebug('connected event source, loading cursor and finalized height');
       metrics.syncHeight = await projectionStore.loadCursorHeight();
       metrics.latestFinalizedHeight = await eventSource.getLatestFinalizedHeight();
       logInfo('registry sync cursor loaded', {
@@ -212,8 +237,14 @@ export function createRegistrySyncService(
 
       if (deps.enableHealthServer ?? true) {
         healthServer = startHealthAndMetricsServer(config.healthPort, metrics);
+        logInfo('registry sync health server started', {
+          healthPort: config.healthPort
+        });
       }
 
+      logInfo('registry sync starting finalized event stream', {
+        fromHeight: metrics.syncHeight + 1
+      });
       await eventSource.startFrom(
         metrics.syncHeight + 1,
         async (event) => {
@@ -223,6 +254,11 @@ export function createRegistrySyncService(
           await projectionStore.commitCursorHeight(height);
           metrics.syncHeight = Math.max(metrics.syncHeight, height);
           metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, height);
+          logDebug('advanced sync cursor from finalized head', {
+            height,
+            syncHeight: metrics.syncHeight,
+            latestFinalizedHeight: metrics.latestFinalizedHeight
+          });
         }
       );
 
@@ -254,6 +290,7 @@ export function createRegistrySyncService(
           });
         });
         healthServer = null;
+        logInfo('registry sync health server stopped');
       }
 
       if (typeof redis.quit === 'function') {

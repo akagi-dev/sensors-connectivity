@@ -1,7 +1,7 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
 import type { RegistryEvent } from './keyspace.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 
 const ROBONOMICS_SS58_PREFIX = 32;
 
@@ -50,6 +50,9 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
     const header = await api.rpc.chain
       .getFinalizedHead()
       .then((hash) => api.rpc.chain.getHeader(hash));
+    logDebug('fetched latest finalized height', {
+      height: header.number.toNumber()
+    });
     return header.number.toNumber();
   }
 
@@ -69,6 +72,10 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
     });
 
     for (let height = fromInclusiveHeight; height <= latestFinalizedHeight; height += 1) {
+      logDebug('processing backfill finalized block', {
+        height,
+        latestFinalizedHeight
+      });
       const hash = await api.rpc.chain.getBlockHash(height);
       const eventsQuery = api.query.system?.events;
       if (!eventsQuery) {
@@ -78,6 +85,10 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
       const codec = await eventsQuery.at(hash as never);
       const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
+      logDebug('normalized registry events from backfill block', {
+        height,
+        eventCount: normalized.length
+      });
       for (const event of normalized) {
         await onEvent(event);
       }
@@ -88,7 +99,15 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
       this.processing = this.processing
         .then(async () => {
           const height = header.number.toNumber();
+          logDebug('received finalized head', {
+            height,
+            fromInclusiveHeight
+          });
           if (height < fromInclusiveHeight) {
+            logDebug('skipping finalized head below start height', {
+              height,
+              fromInclusiveHeight
+            });
             return;
           }
 
@@ -100,6 +119,10 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
           const codec = await eventsQuery.at(header.hash as never);
           const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
+          logDebug('normalized registry events from finalized head', {
+            height,
+            eventCount: normalized.length
+          });
           for (const event of normalized) {
             await onEvent(event);
           }
@@ -118,11 +141,13 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
   async stop(): Promise<void> {
     if (this.unsubscribe) {
+      logDebug('unsubscribing from finalized heads');
       const current = this.unsubscribe;
       this.unsubscribe = null;
       current();
     }
     await this.processing;
+    logDebug('finalized head processing drained');
   }
 
   private requireApi(): ApiPromise {
