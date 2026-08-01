@@ -86,7 +86,7 @@ pnpm --filter @scp/fake-sensor-cli fake-sensor -- --count 3
 Available options:
 
 - `--endpoint <url>` (env: `SENSOR_FAKE_ENDPOINT_URL`, default: `http://localhost:3000/v1/telemetry`)
-- `--sensor-address <ss58>` (env: `SENSOR_FAKE_SENSOR_ADDRESS`; defaults to address derived from signer seed)
+- `--sensor-id <ss58>` (env: `SENSOR_FAKE_SENSOR_ID`; defaults to address derived from signer seed)
 - `--signer-seed-hex <hex>` (env: `SENSOR_FAKE_SIGNER_SEED_HEX`, default: deterministic debug seed `0x00...01`)
 - `--sensor-zone <zone>` (env: `SENSOR_FAKE_SENSOR_ZONE`, optional; sent as `X-Sensor-Zone`)
 - `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
