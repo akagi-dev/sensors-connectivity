@@ -12,7 +12,7 @@ function telemetryHashHex(
 ): string {
   const canonicalMeasurements = canonicalize(measurements);
   const concatenated = `${canonicalMeasurements}${timestamp}${nonce}${sensorAddress}`;
-  return createHash('sha256').update(new TextEncoder().encode(concatenated)).digest('hex');
+  return createHash('sha512').update(new TextEncoder().encode(concatenated)).digest('hex');
 }
 
 describe('verifyTelemetrySignature', () => {

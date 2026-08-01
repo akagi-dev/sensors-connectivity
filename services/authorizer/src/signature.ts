@@ -30,11 +30,11 @@ export async function verifyTelemetrySignature(
   try {
     const canonicalMeasurements = canonicalize(input.measurements);
     const concatenated = `${canonicalMeasurements}${input.timestamp}${input.nonce}${input.sensorAddress}`;
-    const dataHashHex = createHash('sha256')
+    const dataHashHex = createHash('sha512')
       .update(bytesFromUtf8(concatenated))
       .digest('hex');
 
-    // Documented verification path: canonicalize -> concat -> SHA-256 -> Ed25519 verify.
+    // Documented verification path: canonicalize -> concat -> SHA-512 -> Ed25519 verify.
     return ed25519Verify(
       bytesFromHex(dataHashHex),
       bytesFromHex(input.signature),

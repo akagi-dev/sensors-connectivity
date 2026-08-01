@@ -3,7 +3,7 @@ import { createAuthorizerApp } from '../src/index.js';
 import { InMemoryRegistryReader } from '../../registry-sync/src/reader.js';
 
 describe('authorizer smoke', () => {
-  it('returns 403 for disabled/unknown sensor', async () => {
+  it('returns 403 for disabled/unknown sensor and exposes health and metrics counters', async () => {
     const app = createAuthorizerApp({
       registryReader: new InMemoryRegistryReader([]),
       producer: {
