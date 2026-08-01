@@ -1,6 +1,7 @@
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
 import type { RegistryEvent } from './keyspace.js';
+import { logError } from './logger.js';
 
 const ROBONOMICS_SS58_PREFIX = 32;
 
@@ -92,7 +93,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
           await onFinalizedHead?.(height);
         })
         .catch((error) => {
-          console.error('[registry-sync] failed to process finalized head', error);
+          logError('failed to process finalized head', error);
         });
     });
   }

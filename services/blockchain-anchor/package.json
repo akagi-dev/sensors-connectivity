@@ -15,7 +15,8 @@
   "dependencies": {
     "@polkadot/api": "^14.3.1",
     "@scp/contracts": "workspace:*",
-    "kafkajs": "^2.2.4"
+    "kafkajs": "^2.2.4",
+    "pino": "^9.14.0"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

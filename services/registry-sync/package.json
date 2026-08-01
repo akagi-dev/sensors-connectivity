@@ -16,7 +16,8 @@
     "@polkadot/api": "^14.3.1",
     "@polkadot/util-crypto": "^13.5.7",
     "@scp/contracts": "workspace:*",
-    "ioredis": "^5.6.1"
+    "ioredis": "^5.6.1",
+    "pino": "^9.14.0"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

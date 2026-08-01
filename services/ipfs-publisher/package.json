@@ -15,7 +15,8 @@
   "dependencies": {
     "@scp/contracts": "workspace:*",
     "kafkajs": "^2.2.4",
-    "kubo-rpc-client": "^4.1.1"
+    "kubo-rpc-client": "^4.1.1",
+    "pino": "^9.14.0"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

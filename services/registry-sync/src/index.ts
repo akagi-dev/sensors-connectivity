@@ -10,6 +10,7 @@ import {
   toChainEventId,
   type RegistryEvent
 } from './keyspace.js';
+import { logError, logInfo } from './logger.js';
 import { RedisProjectionStore, RedisRetryCounterStore, type RedisLike } from './projection-store.js';
 
 export * from './chain-source.js';
@@ -297,7 +298,7 @@ function startHealthAndMetricsServer(port: number, metrics: RegistrySyncMetrics)
 }
 
 function logStructured(message: string, fields: Record<string, unknown>): void {
-  console.log(JSON.stringify({ service: 'registry-sync', message, ...fields }));
+  logInfo(message, fields);
 }
 
 async function defaultSleep(ms: number): Promise<void> {
@@ -310,7 +311,7 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   const service = createRegistrySyncService();
   service.start().catch((error: unknown) => {
-    console.error('[registry-sync] failed to start', error);
+    logError('failed to start', error);
     process.exitCode = 1;
   });
 }

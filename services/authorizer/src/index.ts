@@ -2,6 +2,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { fileURLToPath } from 'node:url';
+import pino from 'pino';
 import { z } from 'zod';
 import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-sync';
 import type { TelemetryRejectedPayload } from '@scp/contracts';
@@ -31,6 +32,29 @@ const telemetryRequestJsonSchema = {
   },
   additionalProperties: true
 } as const;
+
+const logger = pino({
+  name: 'authorizer',
+  level: process.env.AUTHORIZER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+});
+
+export function logInfo(message: string, context?: Record<string, unknown>): void {
+  logger.info(context ?? {}, message);
+}
+
+export function logWarn(message: string, context?: Record<string, unknown>): void {
+  logger.warn(context ?? {}, message);
+}
+
+export function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+  logger.error(
+    {
+      ...(context ?? {}),
+      error: error instanceof Error ? error.message : String(error)
+    },
+    message
+  );
+}
 
 export interface AuthorizerDeps {
   registryReader: RegistryReader;
@@ -197,14 +221,14 @@ export async function startAuthorizer() {
   });
 
   await app.listen({ host: '0.0.0.0', port: config.port });
-  console.log(`[authorizer] listening on ${config.port}`);
+  logInfo('listening', { port: config.port });
   return app;
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   startAuthorizer().catch((error: unknown) => {
-    console.error('[authorizer] failed to start', error);
+    logError('failed to start', error);
     process.exitCode = 1;
   });
 }
