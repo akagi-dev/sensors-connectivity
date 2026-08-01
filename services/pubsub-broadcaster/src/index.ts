@@ -290,10 +290,10 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
     }
 
     deps.metrics.consumed += 1;
-    deps.metrics.consumerLag = Math.max(
-      Number(payload.batch.highWatermark) - Number(message.offset) - 1,
-      0
-    );
+    const lag = BigInt(payload.batch.highWatermark) - BigInt(message.offset) - 1n;
+    const clampedLag = lag < 0n ? 0n : lag;
+    deps.metrics.consumerLag =
+      clampedLag > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(clampedLag);
     const commitOffset = async () => {
       await deps.consumer.commitOffsets([
         {
