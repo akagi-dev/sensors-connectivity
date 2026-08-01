@@ -190,7 +190,9 @@ export function createRegistrySyncService(
         async (event) => {
           await processEvent(event);
         },
-        (height) => {
+        async (height) => {
+          await projectionStore.commitCursorHeight(height);
+          metrics.syncHeight = Math.max(metrics.syncHeight, height);
           metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, height);
         }
       );

@@ -120,6 +120,7 @@ describe('registry sync service processing', () => {
 
   it('tracks latest finalized head even without registry events', async () => {
     const redis = new FakeRedis();
+    const keys = createRedisKeyspace('registry-sync:v1');
     const source = {
       async connect() {
         return;
@@ -149,7 +150,82 @@ describe('registry sync service processing', () => {
     await service.stop();
 
     expect(service.getMetrics().latestFinalizedHeight).toBe(505);
+    expect(service.getMetrics().syncHeight).toBe(505);
     expect(service.getMetrics().updateCount).toBe(0);
+    expect(await redis.get(keys.cursorHeight)).toBe('505');
+  });
+
+  it('resumes from next height after reboot when prior run had no matching events', async () => {
+    const redis = new FakeRedis();
+    const keys = createRedisKeyspace('registry-sync:v1');
+
+    const firstSource = {
+      async connect() {
+        return;
+      },
+      async disconnect() {
+        return;
+      },
+      async getLatestFinalizedHeight() {
+        return 610;
+      },
+      async startFrom(
+        _fromInclusiveHeight: number,
+        _onEvent: (event: never) => Promise<void>,
+        onFinalizedHead?: (height: number) => Promise<void> | void
+      ) {
+        await onFinalizedHead?.(610);
+      },
+      async stop() {
+        return;
+      }
+    };
+
+    const firstService = createRegistrySyncService({
+      config: testConfig(),
+      redis,
+      eventSource: firstSource,
+      enableHealthServer: false
+    });
+
+    await firstService.start();
+    await firstService.stop();
+    expect(await redis.get(keys.cursorHeight)).toBe('610');
+
+    let secondStartFrom: number | null = null;
+    const secondSource = {
+      async connect() {
+        return;
+      },
+      async disconnect() {
+        return;
+      },
+      async getLatestFinalizedHeight() {
+        return 610;
+      },
+      async startFrom(
+        fromInclusiveHeight: number,
+        _onEvent: (event: never) => Promise<void>,
+        _onFinalizedHead?: (height: number) => Promise<void> | void
+      ) {
+        secondStartFrom = fromInclusiveHeight;
+      },
+      async stop() {
+        return;
+      }
+    };
+
+    const secondService = createRegistrySyncService({
+      config: testConfig(),
+      redis,
+      eventSource: secondSource,
+      enableHealthServer: false
+    });
+
+    await secondService.start();
+    await secondService.stop();
+
+    expect(secondStartFrom).toBe(611);
   });
 
   it('resumes from persisted cursor on restart', async () => {
