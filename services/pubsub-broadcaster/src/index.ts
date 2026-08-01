@@ -216,30 +216,52 @@ export function createPubsubBroadcasterService(
       }
 
       started = true;
-      pubsubClient = await createPubsubClient();
-      await pubsubClient.start();
-      await pubsubClient.connectReservedPeers(config.reservedPeers);
-      await publisher.connect();
-      await consumer.connect();
-      await consumer.subscribe({ topic: TELEMETRY_TOPICS.AUTHORIZED, fromBeginning: false });
-      healthServer = createHealthServer(metrics, config.healthPort);
+      try {
+        pubsubClient = await createPubsubClient();
+        await pubsubClient.start();
+        await pubsubClient.connectReservedPeers(config.reservedPeers);
+        await publisher.connect();
+        await consumer.connect();
+        await consumer.subscribe({ topic: TELEMETRY_TOPICS.AUTHORIZED, fromBeginning: false });
+        healthServer = createHealthServer(metrics, config.healthPort);
 
-      runPromise = consumer.run({
-        autoCommit: false,
-        eachBatchAutoResolve: false,
-        eachBatch: async (batchPayload) => {
-          await processBatch(batchPayload, {
-            config,
-            consumer,
-            pubsub: pubsubClient!,
-            publisher,
-            idempotencyStore,
-            retryStore,
-            metrics,
-            sleep: sleepFn
+        runPromise = consumer.run({
+          autoCommit: false,
+          eachBatchAutoResolve: false,
+          eachBatch: async (batchPayload) => {
+            await processBatch(batchPayload, {
+              config,
+              consumer,
+              pubsub: pubsubClient!,
+              publisher,
+              idempotencyStore,
+              retryStore,
+              metrics,
+              sleep: sleepFn
+            });
+          }
+        });
+      } catch (error) {
+        started = false;
+        runPromise = null;
+
+        if (healthServer) {
+          await new Promise<void>((resolve) => {
+            healthServer?.close(() => {
+              resolve();
+            });
           });
+          healthServer = null;
         }
-      });
+
+        await Promise.allSettled([
+          consumer.disconnect(),
+          publisher.disconnect(),
+          pubsubClient?.stop() ?? Promise.resolve()
+        ]);
+        pubsubClient = null;
+        throw error;
+      }
     },
     async stop(): Promise<void> {
       if (!started) {
