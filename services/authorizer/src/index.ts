@@ -102,9 +102,16 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
           measurements: body.measurements,
           signature: body.signature
         });
-        await deps.registryReader.rememberNonce(body.sensor_address, body.nonce);
       } catch (error) {
         metrics.kafkaErrors += 1;
+        metrics.rejected += 1;
+        request.log.error(error);
+        return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
+      }
+
+      try {
+        await deps.registryReader.rememberNonce(body.sensor_address, body.nonce);
+      } catch (error) {
         metrics.rejected += 1;
         request.log.error(error);
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
