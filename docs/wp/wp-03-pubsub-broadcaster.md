@@ -24,6 +24,7 @@ Implement `pubsub-broadcaster` as an idempotent Kafka consumer that relays `tele
 ### Outputs
 - External side effect: publish authorized telemetry to configured GossipSub topics.
 - Kafka result topic produced: `telemetry.pubsub.result.v1`.
+- Kafka DLQ topic produced on exhausted failures: `telemetry.dlq.v1`.
 
 ## Detailed tasks / Implementation checklist
 - [ ] Replace service stubs/TODOs with a real consumer wired to `telemetry.authorized.v1`.
@@ -35,12 +36,18 @@ Implement `pubsub-broadcaster` as an idempotent Kafka consumer that relays `tele
 - [ ] Route exhausted failures to `telemetry.dlq.v1` using shared consumer runtime policy.
 - [ ] Commit Kafka offset only after external publish handling and result event emission are successful.
 - [ ] Add structured logging and health/metrics endpoint (consumer lag, publish success/failure, retry/DLQ counts).
+- [ ] Add permanent reserved-peer support via `PUBSUB_RESERVED_PEERS` (comma-separated multiaddrs), with startup dial and continuous re-dial.
 
 ## Idempotency & error handling
 - Dedup key: `event_id` from consumed envelope.
 - Reprocessing same `event_id` must not cause unbounded duplicate side effects; apply idempotency tracking around publish attempts.
 - Retry transient publish errors with bounded policy.
 - On exhausted retries, emit DLQ record to `telemetry.dlq.v1` and avoid premature offset commit.
+
+## Configuration notes
+
+- `PUBSUB_TOPIC` controls the deterministic GossipSub fan-out topic (default `telemetry/authorized/v1`).
+- `PUBSUB_RESERVED_PEERS` accepts a comma-separated list of libp2p multiaddrs that should remain permanently connected; the service dials these peers at startup and periodically re-dials to maintain peering.
 
 ## Testing
 - Unit tests:

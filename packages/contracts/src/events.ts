@@ -29,6 +29,18 @@ export const telemetryIpfsPublishedPayloadSchema = z
   })
   .strict();
 
+export const telemetryPubsubResultPayloadSchema = z
+  .object({
+    status: z.enum(['submitted', 'failed']),
+    pubsub_topic: z.string().min(1),
+    sensor_address: z.string().min(1),
+    nonce: z.string().min(1),
+    error_code: z.string().min(1).optional(),
+    error_message: z.string().min(1).optional(),
+    extensions: z.record(z.unknown()).optional()
+  })
+  .strict();
+
 export const telemetryBlockchainResultPayloadSchema = z
   .object({
     target: z.string().min(1),
@@ -44,6 +56,7 @@ export const telemetryBlockchainResultPayloadSchema = z
 export const payloadSchemasByEventType = {
   'telemetry.authorized.v1': telemetryAuthorizedPayloadSchema,
   'telemetry.rejected.v1': telemetryRejectedPayloadSchema,
+  'telemetry.pubsub.result.v1': telemetryPubsubResultPayloadSchema,
   'telemetry.ipfs.result.v1': telemetryIpfsPublishedPayloadSchema,
   'telemetry.blockchain.result.v1': telemetryBlockchainResultPayloadSchema
 } as const;
@@ -56,6 +69,9 @@ export type TelemetryRejectedPayload = z.infer<
 >;
 export type TelemetryIpfsPublishedPayload = z.infer<
   typeof telemetryIpfsPublishedPayloadSchema
+>;
+export type TelemetryPubsubResultPayload = z.infer<
+  typeof telemetryPubsubResultPayloadSchema
 >;
 export type TelemetryBlockchainResultPayload = z.infer<
   typeof telemetryBlockchainResultPayloadSchema

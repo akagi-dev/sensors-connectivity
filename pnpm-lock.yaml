@@ -132,6 +132,9 @@ importers:
       libp2p:
         specifier: ^3.3.8
         version: 3.3.8
+      pino:
+        specifier: ^9.14.0
+        version: 9.14.0
     devDependencies:
       tsup:
         specifier: ^8.5.0

@@ -3,6 +3,7 @@ import { envelopeSchema } from '../src/envelope.js';
 import {
   telemetryAuthorizedPayloadSchema,
   telemetryRejectedPayloadSchema,
+  telemetryPubsubResultPayloadSchema,
   telemetryIpfsPublishedPayloadSchema,
   telemetryBlockchainResultPayloadSchema
 } from '../src/events.js';
@@ -43,6 +44,15 @@ describe('contracts', () => {
       telemetryRejectedPayloadSchema.parse({
         reason_code: 'unauthorized',
         reason_message: 'bad signature'
+      })
+    ).toBeTruthy();
+
+    expect(
+      telemetryPubsubResultPayloadSchema.parse({
+        status: 'submitted',
+        pubsub_topic: 'telemetry/authorized/v1',
+        sensor_address: 'sensor-1',
+        nonce: 'nonce-1'
       })
     ).toBeTruthy();
 

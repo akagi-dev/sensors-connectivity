@@ -5,7 +5,7 @@ TypeScript monorepo scaffold for the telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00/WP-01 are implemented and WP-02 (`authorizer`) is fully implemented. WP-03 to WP-05 remain scaffolded.
+> Current phase: WP-00 through WP-03 are implemented (`contracts`, `registry-sync`, `authorizer`, `pubsub-broadcaster`). WP-04 and WP-05 remain scaffolded.
 
 ## Stack
 
@@ -98,7 +98,7 @@ The CLI now sends authorizer-compatible payloads (`sensor_address`, `timestamp`,
 
 - **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
 - **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
-- **pubsub-broadcaster**: consumes `telemetry.authorized.v1` and publishes to GossipSub (stubbed), commit-after-success flow.
+- **pubsub-broadcaster**: consumes `telemetry.authorized.v1`, validates contracts, publishes to GossipSub (with optional reserved peers), emits `telemetry.pubsub.result.v1`, and routes exhausted failures to DLQ.
 - **ipfs-publisher**: consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
 - **blockchain-anchor**: consumes `telemetry.ipfs.result.v1`, dedups by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring.
 
