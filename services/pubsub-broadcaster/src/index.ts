@@ -490,7 +490,7 @@ function createKafkaEnvelopePublisher(producer: Producer): EnvelopePublisher {
       await producer.disconnect();
       connected = false;
       connectPromise = undefined;
-    }
+    },
     async publish(topic: string, key: string, envelope: Envelope) {
       await ensureConnected();
       await producer.send({
