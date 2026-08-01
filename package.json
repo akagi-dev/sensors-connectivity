@@ -7,7 +7,8 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "dev": "turbo run dev --parallel"
+    "dev": "turbo run dev --parallel",
+    "fake-sensor": "pnpm --filter @scp/fake-sensor-cli fake-sensor"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",

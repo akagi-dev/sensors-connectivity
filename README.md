@@ -49,6 +49,7 @@ services/registry-sync     # substrate->redis projection sync service
 services/pubsub-broadcaster
 services/ipfs-publisher
 services/blockchain-anchor # phase-1 CID-only anchoring stub
+tools/fake-sensor-cli      # fake telemetry sender for debug/tests
 ```
 
 ## Per-service development
@@ -60,6 +61,38 @@ pnpm --filter @scp/pubsub-broadcaster dev
 pnpm --filter @scp/ipfs-publisher dev
 pnpm --filter @scp/blockchain-anchor dev
 ```
+
+## Fake sensor telemetry CLI
+
+Use this helper CLI to post fake telemetry messages for local debugging and integration testing.
+
+Run from repo root:
+
+```bash
+pnpm fake-sensor -- \
+  --endpoint http://localhost:3000/v1/telemetry \
+  --signer-seed-hex 0x0101010101010101010101010101010101010101010101010101010101010101 \
+  --count 5 \
+  --interval-ms 1000 \
+  --sensor-zone eu-west
+```
+
+Run directly in tools workspace:
+
+```bash
+pnpm --filter @scp/fake-sensor-cli fake-sensor -- --count 3
+```
+
+Available options:
+
+- `--endpoint <url>` (env: `SENSOR_FAKE_ENDPOINT_URL`, default: `http://localhost:3000/v1/telemetry`)
+- `--sensor-address <ss58>` (env: `SENSOR_FAKE_SENSOR_ADDRESS`; defaults to address derived from signer seed)
+- `--signer-seed-hex <hex>` (env: `SENSOR_FAKE_SIGNER_SEED_HEX`, default: deterministic debug seed `0x00...01`)
+- `--sensor-zone <zone>` (env: `SENSOR_FAKE_SENSOR_ZONE`, optional; sent as `X-Sensor-Zone`)
+- `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
+- `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
+
+The CLI now sends authorizer-compatible payloads (`sensor_address`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
 
 ## Service overview
 

@@ -1,0 +1,19 @@
+{
+  "name": "@scp/fake-sensor-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fake-sensor": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@polkadot/util-crypto": "^13.5.9",
+    "json-canonicalize": "^1.1.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.3"
+  }
+}
