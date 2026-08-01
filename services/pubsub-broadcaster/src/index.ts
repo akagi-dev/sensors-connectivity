@@ -13,6 +13,7 @@ import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createLibp2p } from 'libp2p';
+import pino from 'pino';
 import { loadPubsubBroadcasterConfig, type PubsubBroadcasterConfig } from './config.js';
 
 interface PubsubBroadcasterMetrics {
@@ -84,28 +85,27 @@ interface ProcessingContext {
   metrics: PubsubBroadcasterMetrics;
 }
 
+const logger = pino({
+  name: 'pubsub-broadcaster',
+  level: process.env.PUBSUB_BROADCASTER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+});
+
 function logInfo(message: string, context?: Record<string, unknown>): void {
-  if (context && Object.keys(context).length > 0) {
-    console.info('[pubsub-broadcaster]', message, context);
-    return;
-  }
-  console.info('[pubsub-broadcaster]', message);
+  logger.info(context ?? {}, message);
 }
 
 function logWarn(message: string, context?: Record<string, unknown>): void {
-  if (context && Object.keys(context).length > 0) {
-    console.warn('[pubsub-broadcaster]', message, context);
-    return;
-  }
-  console.warn('[pubsub-broadcaster]', message);
+  logger.warn(context ?? {}, message);
 }
 
 function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
-  const details = {
-    ...(context ?? {}),
-    error: error instanceof Error ? error.message : String(error)
-  };
-  console.error('[pubsub-broadcaster]', message, details);
+  logger.error(
+    {
+      ...(context ?? {}),
+      error: error instanceof Error ? error.message : String(error)
+    },
+    message
+  );
 }
 
 export async function processAuthorizedEnvelope(
@@ -667,14 +667,14 @@ async function sleep(ms: number): Promise<void> {
 export async function startPubsubBroadcaster(): Promise<PubsubBroadcasterService> {
   const service = createPubsubBroadcasterService();
   await service.start();
-  console.log('[pubsub-broadcaster] started');
+  logInfo('service started (direct run)');
   return service;
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   startPubsubBroadcaster().catch((error: unknown) => {
-    console.error('[pubsub-broadcaster] failed to start', error);
+    logError('failed to start (direct run)', error);
     process.exitCode = 1;
   });
 }
