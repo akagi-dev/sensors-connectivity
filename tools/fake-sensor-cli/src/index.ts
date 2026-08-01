@@ -19,6 +19,16 @@ const DEFAULT_SIGNER_SEED_HEX = '0x000000000000000000000000000000000000000000000
 
 export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv): FakeSensorCliOptions {
   const argValues = new Map<string, string>();
+  const supportedKeys = new Set([
+    'endpoint',
+    'signer-seed-hex',
+    'count',
+    'interval-ms',
+    'sensor-zone',
+    'sensor-address',
+    'sensor-id'
+  ]);
+
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
     if (!token) {
@@ -34,15 +44,20 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
       continue;
     }
     const key = rawKey.trim();
+    if (!supportedKeys.has(key)) {
+      throw new Error(`Unknown option: --${key}`);
+    }
+
     const nextToken = args[i + 1];
     const value = inlineValue ?? (nextToken && !nextToken.startsWith('--') ? nextToken : undefined);
-    if (value !== undefined && inlineValue === undefined && nextToken && !nextToken.startsWith('--')) {
+    if (value === undefined) {
+      throw new Error(`Missing value for --${key}`);
+    }
+    if (inlineValue === undefined && nextToken && !nextToken.startsWith('--')) {
       i += 1;
     }
 
-    if (value !== undefined) {
-      argValues.set(key, value);
-    }
+    argValues.set(key, value);
   }
 
   const endpointUrl = argValues.get('endpoint') ?? env.SENSOR_FAKE_ENDPOINT_URL ?? DEFAULT_ENDPOINT_URL;
