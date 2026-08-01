@@ -1,18 +1,42 @@
 import { TELEMETRY_TOPICS, type TelemetryAuthorizedPayload } from '@scp/contracts';
 import { Kafka } from 'kafkajs';
+import { randomUUID } from 'node:crypto';
 
 export interface AuthorizerEventProducer {
   publishAuthorized(payload: TelemetryAuthorizedPayload): Promise<void>;
 }
 
-export function createAuthorizerEventProducer(brokers: string[]): AuthorizerEventProducer {
+export function createAuthorizerEventProducer(
+  brokers: string[],
+  source = 'authorizer'
+): AuthorizerEventProducer {
   const kafka = new Kafka({ clientId: 'authorizer', brokers });
-  void kafka;
+  const producer = kafka.producer();
+  let connected = false;
 
   return {
     async publishAuthorized(payload: TelemetryAuthorizedPayload): Promise<void> {
-      // TODO: connect producer and wait for Kafka ACK before returning.
-      console.log('[authorizer] stub publish', TELEMETRY_TOPICS.AUTHORIZED, payload);
+      if (!connected) {
+        await producer.connect();
+        connected = true;
+      }
+
+      await producer.send({
+        topic: TELEMETRY_TOPICS.AUTHORIZED,
+        messages: [
+          {
+            key: `${payload.sensor_address}:${payload.nonce}`,
+            value: JSON.stringify({
+              event_id: randomUUID(),
+              event_type: TELEMETRY_TOPICS.AUTHORIZED,
+              event_version: 'v1',
+              occurred_at: new Date().toISOString(),
+              source,
+              payload
+            })
+          }
+        ]
+      });
     }
   };
 }

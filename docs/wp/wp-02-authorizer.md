@@ -3,6 +3,11 @@
 ## Summary
 WP-02 implements trusted telemetry ingress at `POST /v1/telemetry`. The service validates request structure and anti-replay/security checks, verifies Ed25519 signatures using canonical hashing rules, and authorizes sensors against the Redis projection. Authorized events are published to Kafka, and `202` is returned only after broker acknowledgment.
 
+## Current status snapshot
+- Implemented: ingress route scaffold, schema validation, Redis-backed sensor/nonce checks, signature verification path, `401/403/409/503/202` response mapping.
+- Implemented in this increment: ACK-gated Kafka producer send path for `telemetry.authorized.v1`, basic `/health` and `/metrics` endpoints, and signature hash input alignment (`canonical_measurements || timestamp || nonce || sensor_address`).
+- Remaining for full WP-02 DoD: rejection-event publish path (`telemetry.rejected.v1`), timestamp window enforcement, bounded retry/DLQ around producer failures, broader integration coverage.
+
 ## Depends on
 - WP-00
 - WP-01

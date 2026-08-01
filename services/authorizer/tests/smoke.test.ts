@@ -26,6 +26,17 @@ describe('authorizer smoke', () => {
     });
 
     expect(response.statusCode).toBe(403);
+
+    const health = await app.inject({ method: 'GET', url: '/health' });
+    expect(health.statusCode).toBe(200);
+
+    const metrics = await app.inject({ method: 'GET', url: '/metrics' });
+    expect(metrics.statusCode).toBe(200);
+    expect(metrics.json()).toEqual({
+      accepted: 0,
+      rejected: 1,
+      kafkaErrors: 0
+    });
     await app.close();
   });
 });

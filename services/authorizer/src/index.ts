@@ -38,10 +38,19 @@ export interface AuthorizerDeps {
 
 export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
   const app = Fastify({ logger: false });
+  const metrics = {
+    accepted: 0,
+    rejected: 0,
+    kafkaErrors: 0
+  };
+
   app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute'
   });
+
+  app.get('/health', async () => ({ status: 'ok' }));
+  app.get('/metrics', async () => metrics);
 
   app.post(
     '/v1/telemetry',
@@ -61,16 +70,19 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
 
       const record = await deps.registryReader.getSensorRecord(body.sensor_address);
       if (!record || !record.enabled) {
+        metrics.rejected += 1;
         return reply.code(403).send({ status: 'rejected', error_code: 'sensor_forbidden' });
       }
 
       const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_address, body.nonce);
       if (nonceSeen) {
+        metrics.rejected += 1;
         return reply.code(409).send({ status: 'rejected', error_code: 'duplicate_nonce' });
       }
 
       const signatureValid = await verifyTelemetrySignature({
         measurements: body.measurements,
+        timestamp: body.timestamp,
         nonce: body.nonce,
         sensorAddress: body.sensor_address,
         signature: body.signature,
@@ -78,6 +90,7 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
       });
 
       if (!signatureValid) {
+        metrics.rejected += 1;
         return reply.code(401).send({ status: 'rejected', error_code: 'invalid_signature' });
       }
 
@@ -91,10 +104,13 @@ export function createAuthorizerApp(deps: AuthorizerDeps): FastifyInstance {
         });
         await deps.registryReader.rememberNonce(body.sensor_address, body.nonce);
       } catch (error) {
+        metrics.kafkaErrors += 1;
+        metrics.rejected += 1;
         request.log.error(error);
         return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
       }
 
+      metrics.accepted += 1;
       return reply.code(202).send({ status: 'accepted' });
     }
   );
@@ -106,7 +122,7 @@ export async function startAuthorizer() {
   const config = loadAuthorizerConfig();
   const app = createAuthorizerApp({
     registryReader: createRegistryReaderFromEnv(),
-    producer: createAuthorizerEventProducer(config.kafkaBrokers)
+    producer: createAuthorizerEventProducer(config.kafkaBrokers, config.source)
   });
 
   await app.listen({ host: '0.0.0.0', port: config.port });

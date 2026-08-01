@@ -4,6 +4,7 @@ import { canonicalize } from 'json-canonicalize';
 
 export interface SignatureVerificationInput {
   measurements: Record<string, unknown>;
+  timestamp: string;
   nonce: string;
   sensorAddress: string;
   signature: string;
@@ -26,13 +27,9 @@ function bytesFromHex(input: string): Uint8Array {
 export async function verifyTelemetrySignature(
   input: SignatureVerificationInput
 ): Promise<boolean> {
-  if (input.signerAddress.startsWith('TODO_')) {
-    return false;
-  }
-
   try {
     const canonicalMeasurements = canonicalize(input.measurements);
-    const concatenated = `${canonicalMeasurements}${input.nonce}${input.sensorAddress}`;
+    const concatenated = `${canonicalMeasurements}${input.timestamp}${input.nonce}${input.sensorAddress}`;
     const dataHashHex = createHash('sha256')
       .update(bytesFromUtf8(concatenated))
       .digest('hex');
