@@ -1,15 +1,21 @@
+import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
 import { describe, expect, it } from 'vitest';
 import { createFakePayload, parseFakeSensorCliOptions } from '../src/index.js';
 
 describe('fake sensor CLI', () => {
-  it('parses args with defaults', () => {
+  it('parses args with defaults', async () => {
+    await cryptoWaitReady();
+    const signerSeedHex = '0x0000000000000000000000000000000000000000000000000000000000000001';
+    const seed = Buffer.from(signerSeedHex.slice(2), 'hex');
+    const expectedSensorAddress = encodeAddress(ed25519PairFromSeed(seed).publicKey, 32);
+
     const options = parseFakeSensorCliOptions([], {});
     expect(options).toEqual({
       endpointUrl: 'http://localhost:3000/v1/telemetry',
-      sensorAddress: '5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt',
+      sensorAddress: expectedSensorAddress,
       count: 1,
       intervalMs: 1000,
-      signerSeedHex: '0x0000000000000000000000000000000000000000000000000000000000000001'
+      signerSeedHex
     });
   });
 
