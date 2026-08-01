@@ -452,13 +452,23 @@ function createKafkaEnvelopePublisher(producer: Producer): EnvelopePublisher {
   return {
     connect: () => ensureConnected(),
     async disconnect() {
+      if (connectPromise) {
+        try {
+          await connectPromise;
+        } catch {
+          // ignore connect failures; producer isn't connected
+        }
+      }
+
       if (!connected) {
+        connectPromise = undefined;
         return;
       }
+
       await producer.disconnect();
       connected = false;
       connectPromise = undefined;
-    },
+    }
     async publish(topic: string, key: string, envelope: Envelope) {
       await ensureConnected();
       await producer.send({
