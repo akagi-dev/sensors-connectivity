@@ -23,7 +23,7 @@ Robonomics chain -> Registry Sync -> Redis projection
 | [WP-00](./wp-00-contracts.md) | `@scp/contracts` (shared schemas, envelope, topics, consumer runtime) | — | Done |
 | [WP-01](./wp-01-registry-sync.md) | `registry-sync` (substrate → Redis projection) | WP-00 | Implemented (pending formal DoD sign-off) |
 | [WP-02](./wp-02-authorizer.md) | `authorizer` (`POST /v1/telemetry` ingress) | WP-00, WP-01 | Implemented (pending formal DoD sign-off) |
-| [WP-03](./wp-03-pubsub-broadcaster.md) | `pubsub-broadcaster` (GossipSub fan-out) | WP-00, WP-02 | Not started |
+| [WP-03](./wp-03-pubsub-broadcaster.md) | `pubsub-broadcaster` (GossipSub fan-out) | WP-00, WP-02 | Implemented |
 | [WP-04](./wp-04-ipfs-publisher.md) | `ipfs-publisher` (batch + IPFS CID) | WP-00, WP-02 | Not started |
 | [WP-05](./wp-05-blockchain-anchor.md) | `blockchain-anchor` (CID-only anchoring) | WP-00, WP-04 | Not started |
 
