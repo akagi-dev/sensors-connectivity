@@ -164,6 +164,9 @@ export function createHeartbeatTrackerState(
       for (let i = 0; i < sensorIds.length; i++) {
         const sensorId = sensorIds[i];
         const heartbeat = heartbeats[i];
+        if (sensorId === undefined || heartbeat === undefined) {
+          continue;
+        }
         const firstSeen = Number.parseInt(heartbeat.firstSeen ?? '', 10);
         const lastSeen = Number.parseInt(heartbeat.lastSeen ?? '', 10);
         const onlineSince = Number.parseInt(heartbeat.onlineSince ?? '', 10);

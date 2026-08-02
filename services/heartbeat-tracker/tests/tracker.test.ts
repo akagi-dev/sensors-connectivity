@@ -222,6 +222,6 @@ describe('heartbeat tracker state', () => {
     expect(metrics.sensors_total_tracked).toBe(1);
     expect(metrics.sensors_online).toBe(1);
     expect(metrics.sensors_uptime.length).toBe(1);
-    expect(metrics.sensors_uptime[0].sensor_id).toBe('sensor-recent');
+    expect(metrics.sensors_uptime.at(0)?.sensor_id).toBe('sensor-recent');
   });
 });
