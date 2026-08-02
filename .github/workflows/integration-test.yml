@@ -88,7 +88,7 @@ jobs:
 
           wait_for_port "Kafka" "127.0.0.1" "9092" "180"
           wait_for_port "Redis" "127.0.0.1" "6379" "120"
-          wait_for_port "Substrate WS" "127.0.0.1" "9944" "240"
+          wait_for_port "Robonomics" "127.0.0.1" "9944" "240"
 
           elapsed=0
           until curl --silent --show-error --fail -X POST "${IPFS_API_URL}/api/v0/version" >/dev/null; do
