@@ -36,13 +36,17 @@ It is implementation-oriented and aligned with the architecture baseline in `/do
 
 ### Request body schema (normative)
 
-| Field            | Type                 | Required | Description                                                                                                             |
-| ---------------- | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `measurements`   | object               | yes      | Sensor readings to be signed.                                                                                           |
-| `sensor_id` | string               | yes      | Robonomics SS58 sensor identity used to resolve public key/authorization state.                                         |
-| `timestamp`      | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
-| `nonce`          | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                        |
-| `signature`      | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented message bytes. |
+| Field                    | Type                 | Required | Description                                                                                                             |
+| ------------------------ | -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `payload`                | object               | yes      | Canonical telemetry payload to be signed.                                                                              |
+| `payload.measurements`   | object               | yes      | Sensor readings.                                                                                                       |
+| `payload.meta`           | object               | no       | Optional metadata (for example device type or firmware version).                                                       |
+| `sensor_id`              | string               | yes      | Robonomics SS58 sensor identity used to resolve public key/authorization state.                                        |
+| `timestamp`              | string (RFC3339 UTC) | yes      | Measurement creation time used for skew/replay checks.                                                                  |
+| `nonce`                  | string               | yes      | Unique request nonce for replay protection (for example monotonic counter or random hex string).                      |
+| `signature`              | string               | yes      | Base64 Ed25519 signature (64 raw bytes) generated via Substrate-compatible signing flow over the documented message bytes. |
+
+Compatibility note: this is a breaking wire-contract change. Top-level `measurements` has been replaced by top-level `payload`.
 
 ### Minimal request example
 
@@ -54,8 +58,10 @@ X-Request-Id: 95ef04de-4de8-409e-b807-156460698514
 X-Sensor-Zone: eu-west
 
 {
-  "measurements": {
-    "temperature_c": 21.4
+  "payload": {
+    "measurements": {
+      "temperature_c": 21.4
+    }
   },
   "sensor_id": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
@@ -68,17 +74,23 @@ X-Sensor-Zone: eu-west
 
 ```json
 {
-  "measurements": {
-    "temperature_c": 21.4,
-    "humidity_pct": 53.2,
-    "pressure_hpa": 1008.7,
-    "pm25_ug_m3": 8.1,
-    "battery_v": 3.78,
-    "location": {
-      "lat": 51.5074,
-      "lon": -0.1278
+  "payload": {
+    "meta": {
+      "device_type": "sensor_v2",
+      "firmware_version": "1.2.3"
     },
-    "tags": ["indoor", "lab-2"]
+    "measurements": {
+      "temperature_c": 21.4,
+      "humidity_pct": 53.2,
+      "pressure_hpa": 1008.7,
+      "pm25_ug_m3": 8.1,
+      "battery_v": 3.78,
+      "location": {
+        "lat": 51.5074,
+        "lon": -0.1278
+      },
+      "tags": ["indoor", "lab-2"]
+    }
   },
   "sensor_id": "4CvP46mxFm54eBbTMFayHK7n38MaXo7gCbq7KCHSd28xrWSJ",
   "timestamp": "2026-07-31T14:20:18Z",
@@ -89,9 +101,9 @@ X-Sensor-Zone: eu-west
 
 ## Signing and verification (normative)
 
-### Canonicalization rules for `measurements`
+### Canonicalization rules for `payload`
 
-`measurements` MUST be canonicalized deterministically before hashing.
+`payload` MUST be canonicalized deterministically before hashing.
 
 1. Encode as UTF-8 bytes.
 2. Object keys MUST be sorted lexicographically at every nesting level.
@@ -105,7 +117,7 @@ X-Sensor-Zone: eu-west
 
 The message bytes to sign MUST be built in this exact order:
 
-`canonical_measurements || timestamp || nonce || sensor_id`
+`canonical_payload || timestamp || nonce || sensor_id`
 
 Then:
 
@@ -116,8 +128,8 @@ Then:
 ### Signing pseudocode
 
 ```text
-function signTelemetry(measurements, timestamp, nonce, sensorId, privateKey):
-  canonical = canonicalJson(measurements)      // sorted keys, deterministic encoding
+function signTelemetry(payload, timestamp, nonce, sensorId, privateKey):
+  canonical = canonicalJson(payload)           // sorted keys, deterministic encoding
   message = utf8(canonical) + utf8(timestamp) + utf8(nonce) + utf8(sensorId)
   sig = substrate_ed25519_sign(privateKey, message) // 64-byte signature
   return base64(sig)
@@ -127,7 +139,7 @@ function signTelemetry(measurements, timestamp, nonce, sensorId, privateKey):
 
 ```text
 function verifyTelemetry(request, publicKey):
-  canonical = canonicalJson(request.measurements)
+  canonical = canonicalJson(request.payload)
   message = utf8(canonical) + utf8(request.timestamp) + utf8(request.nonce) + utf8(request.sensor_id)
   signatureBytes = base64_decode(request.signature)
   return substrate_ed25519_verify(publicKey, message, signatureBytes)
@@ -140,6 +152,7 @@ function verifyTelemetry(request, publicKey):
 - Non-UTF-8 encoding.
 - Address is not encoded as Robonomics Network address (general substrate encoding).
 - Hashing externally before signing/verifying instead of passing message bytes directly to the Substrate-compatible Ed25519 library.
+- Canonicalizing only `payload.measurements` instead of canonicalizing the entire `payload`.
 - Omitting `timestamp` from the signed message input.
 - Trailing spaces/newlines in `nonce` or `sensor_id`.
 - Wrong signature encoding (must be base64 of raw 64-byte signature).
@@ -298,7 +311,7 @@ Example:
 {
   "error": {
     "code": "schema_validation_error",
-    "message": "measurements.temperature_c must be a number",
+    "message": "payload.measurements.temperature_c must be a number",
     "request_id": "95ef04de-4de8-409e-b807-156460698514",
     "zone": "eu-west"
   }
