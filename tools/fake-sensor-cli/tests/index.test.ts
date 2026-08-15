@@ -1,6 +1,6 @@
 import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
 import { describe, expect, it } from 'vitest';
-import { createFakeEnvelopePayload, parseFakeSensorCliOptions } from '../src/index.js';
+import { createFakeEnvelopePayload, decodeCoreMessageBytes, parseFakeSensorCliOptions } from '../src/index.js';
 
 function readVarint(bytes: Uint8Array, start: number): { value: number; nextOffset: number } {
   let value = 0;
@@ -21,14 +21,7 @@ function readVarint(bytes: Uint8Array, start: number): { value: number; nextOffs
   throw new Error('invalid varint');
 }
 
-function readLengthDelimited(bytes: Uint8Array, start: number): { value: Uint8Array; nextOffset: number } {
-  const { value: length, nextOffset } = readVarint(bytes, start);
-  const end = nextOffset + length;
-  return { value: bytes.subarray(nextOffset, end), nextOffset: end };
-}
-
-function collectLengthDelimitedFields(bytes: Uint8Array, targetField: number): Uint8Array[] {
-  const fields: Uint8Array[] = [];
+function firstLengthDelimitedField(bytes: Uint8Array, targetField: number): Uint8Array {
   let offset = 0;
   while (offset < bytes.length) {
     const { value: tag, nextOffset: tagOffset } = readVarint(bytes, offset);
@@ -36,19 +29,21 @@ function collectLengthDelimitedFields(bytes: Uint8Array, targetField: number): U
     const fieldNumber = tag >> 3;
     const wireType = tag & 0x07;
     if (wireType === 2) {
-      const { value, nextOffset } = readLengthDelimited(bytes, offset);
+      const { value: length, nextOffset } = readVarint(bytes, offset);
+      const end = nextOffset + length;
+      const value = bytes.subarray(nextOffset, end);
       if (fieldNumber === targetField) {
-        fields.push(Uint8Array.from(value));
+        return Uint8Array.from(value);
       }
-      offset = nextOffset;
-      continue;
-    }
-    if (wireType === 1) {
-      offset += 8;
+      offset = end;
       continue;
     }
     if (wireType === 0) {
       offset = readVarint(bytes, offset).nextOffset;
+      continue;
+    }
+    if (wireType === 1) {
+      offset += 8;
       continue;
     }
     if (wireType === 5) {
@@ -57,15 +52,7 @@ function collectLengthDelimitedFields(bytes: Uint8Array, targetField: number): U
     }
     throw new Error(`unsupported wire type ${wireType}`);
   }
-  return fields;
-}
-
-function firstLengthDelimitedField(bytes: Uint8Array, targetField: number): Uint8Array {
-  const fields = collectLengthDelimitedFields(bytes, targetField);
-  if (fields.length === 0) {
-    throw new Error(`missing field ${targetField}`);
-  }
-  return fields[0]!;
+  throw new Error(`missing field ${targetField}`);
 }
 
 describe('fake sensor CLI', () => {
@@ -119,22 +106,14 @@ describe('fake sensor CLI', () => {
     expect(payload.sensorAddress).toBe(encodeAddress(ed25519PairFromSeed(Buffer.from(signerSeedHex.slice(2), 'hex')).publicKey, 32));
     expect(payload.nonce.length).toBe(16);
 
-    const message = firstLengthDelimitedField(payload.envelopeBytes, 4);
-    const metadata = collectLengthDelimitedFields(message, 1);
-    const urban = collectLengthDelimitedFields(message, 2);
-    expect(metadata).toHaveLength(1);
-    expect(urban).toHaveLength(1);
+    const message = decodeCoreMessageBytes(firstLengthDelimitedField(payload.envelopeBytes, 4));
+    expect(message.metadata).toHaveLength(1);
+    expect(message.urban).toHaveLength(1);
 
-    const publicSensors = collectLengthDelimitedFields(urban[0]!, 1);
+    const publicSensors = message.urban?.[0]?.sensors;
     expect(publicSensors).toHaveLength(2);
-
-    const firstSensorBme280 = collectLengthDelimitedFields(publicSensors[0]!, 2);
-    const secondSensorBme280 = collectLengthDelimitedFields(publicSensors[1]!, 2);
-    expect(firstSensorBme280).toHaveLength(1);
-    expect(secondSensorBme280).toHaveLength(1);
-
-    expect(collectLengthDelimitedFields(firstSensorBme280[0]!, 1)).toHaveLength(1);
-    expect(collectLengthDelimitedFields(secondSensorBme280[0]!, 2)).toHaveLength(1);
+    expect(publicSensors?.[0]?.bme280?.temperature?.value).toBeTypeOf('number');
+    expect(publicSensors?.[1]?.bme280?.humidity?.value).toBeTypeOf('number');
   });
 
   it('throws for invalid numeric options', () => {

@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import protobuf from 'protobufjs';
 import {
   buildEnvelopeSigningBytes,
-  concatBytes,
   createSignedEnvelope,
   toSignedEnvelopeBytes
 } from '@scp/contracts';
@@ -22,6 +22,27 @@ const DEFAULT_ENDPOINT_URL = 'http://localhost:3000/v1/telemetry';
 const DEFAULT_COUNT = 1;
 const DEFAULT_INTERVAL_MS = 1000;
 const DEFAULT_SIGNER_SEED_HEX = '0x0000000000000000000000000000000000000000000000000000000000000001';
+
+const coreMessageRoot = new protobuf.Root();
+coreMessageRoot.define('core.v1').add(
+  new protobuf.Type('Measurement').add(new protobuf.Field('value', 1, 'double'))
+);
+coreMessageRoot.define('core.v1').add(
+  new protobuf.Type('Bme280')
+    .add(new protobuf.Field('temperature', 1, 'Measurement'))
+    .add(new protobuf.Field('humidity', 2, 'Measurement'))
+);
+coreMessageRoot.define('core.v1').add(new protobuf.Type('PublicSensor').add(new protobuf.Field('bme280', 2, 'Bme280')));
+coreMessageRoot.define('core.v1').add(
+  new protobuf.Type('Urban').add(new protobuf.Field('sensors', 1, 'PublicSensor', 'repeated'))
+);
+coreMessageRoot.define('core.v1').add(new protobuf.Type('Metadata').add(new protobuf.Field('owner', 1, 'bytes')));
+coreMessageRoot.define('core.v1').add(
+  new protobuf.Type('Message')
+    .add(new protobuf.Field('metadata', 1, 'Metadata', 'repeated'))
+    .add(new protobuf.Field('urban', 2, 'Urban', 'repeated'))
+);
+const coreMessageCodec = coreMessageRoot.lookupType('core.v1.Message');
 
 const logger = pino({
   name: 'fake-sensor-cli',
@@ -162,54 +183,32 @@ function parseSeedHex(seedHex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(normalizedSeed, 'hex'));
 }
 
-function encodeVarint(value: number): Uint8Array {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`Invalid varint value: ${value}`);
-  }
-  const chunks: number[] = [];
-  let remaining = value;
-  while (remaining >= 0x80) {
-    chunks.push((remaining & 0x7f) | 0x80);
-    remaining >>>= 7;
-  }
-  chunks.push(remaining);
-  return Uint8Array.from(chunks);
-}
-
-function encodeTag(fieldNumber: number, wireType: number): Uint8Array {
-  return encodeVarint((fieldNumber << 3) | wireType);
-}
-
-function encodeLengthDelimitedField(fieldNumber: number, value: Uint8Array): Uint8Array {
-  return concatBytes([encodeTag(fieldNumber, 2), encodeVarint(value.length), value]);
-}
-
-function encodeDoubleField(fieldNumber: number, value: number): Uint8Array {
-  const bytes = new Uint8Array(8);
-  new DataView(bytes.buffer).setFloat64(0, value, true);
-  return concatBytes([encodeTag(fieldNumber, 1), bytes]);
-}
-
-function createBme280TemperatureSensor(temperatureCelsius: number): Uint8Array {
-  const measurement = encodeLengthDelimitedField(1, encodeDoubleField(1, temperatureCelsius));
-  return encodeLengthDelimitedField(2, measurement);
-}
-
-function createBme280HumiditySensor(humidityPercent: number): Uint8Array {
-  const measurement = encodeLengthDelimitedField(2, encodeDoubleField(1, humidityPercent));
-  return encodeLengthDelimitedField(2, measurement);
-}
-
 function createCoreMessageBytes(ownerPublicKey: Uint8Array, temperatureCelsius: number, humidityPercent: number): Uint8Array {
-  const metadata = encodeLengthDelimitedField(1, encodeLengthDelimitedField(1, ownerPublicKey));
-  const urban = encodeLengthDelimitedField(
-    2,
-    concatBytes([
-      encodeLengthDelimitedField(1, createBme280TemperatureSensor(temperatureCelsius)),
-      encodeLengthDelimitedField(1, createBme280HumiditySensor(humidityPercent))
-    ])
-  );
-  return concatBytes([metadata, urban]);
+  const payload = {
+    metadata: [{ owner: ownerPublicKey }],
+    urban: [
+      {
+        sensors: [
+          { bme280: { temperature: { value: temperatureCelsius } } },
+          { bme280: { humidity: { value: humidityPercent } } }
+        ]
+      }
+    ]
+  };
+  const verifyError = coreMessageCodec.verify(payload);
+  if (verifyError) {
+    throw new Error(`Invalid core.v1.Message payload: ${verifyError}`);
+  }
+  return coreMessageCodec.encode(coreMessageCodec.create(payload)).finish();
+}
+
+export interface DecodedCoreMessage {
+  metadata?: Array<{ owner?: Uint8Array }>;
+  urban?: Array<{ sensors?: Array<{ bme280?: { temperature?: { value?: number }; humidity?: { value?: number } } }> }>;
+}
+
+export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
+  return coreMessageCodec.toObject(coreMessageCodec.decode(bytes), { bytes: Uint8Array }) as DecodedCoreMessage;
 }
 
 export function createFakeEnvelopePayload(signerSeedHex: string): FakeEnvelopePayload {
