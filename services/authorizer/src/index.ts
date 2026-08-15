@@ -107,7 +107,14 @@ export function createAuthorizerApp(
   app.get('/health', async () => ({ status: 'ok' }));
   app.get('/metrics', async () => metrics);
 
-  app.post('/v1/telemetry', async (request, reply) => {
+  app.post('/v1/telemetry', {
+    config: {
+      rateLimit: {
+        max: 100,
+        timeWindow: '1 minute'
+      }
+    }
+  }, async (request, reply) => {
     const traceId = request.headers['x-request-id']?.toString() ?? request.id;
     let parsedEnvelope: SignedEnvelope;
     let rawEnvelopeBytes: Uint8Array;
