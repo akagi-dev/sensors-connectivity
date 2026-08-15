@@ -152,7 +152,7 @@ jobs:
             echo "${name} is healthy: ${url}"
           }
 
-          wait_for_http "Authorizer" "http://127.0.0.1:${ENDPOINT_PORT}/health" "120"
+          wait_for_http "Endpoint" "http://127.0.0.1:${ENDPOINT_PORT}/health" "120"
           wait_for_http "Registry Sync" "http://127.0.0.1:${REGISTRY_SYNC_HEALTH_PORT}/health" "180"
           wait_for_http "Pubsub Broadcaster" "http://127.0.0.1:${PUBSUB_BROADCASTER_HEALTH_PORT}/health" "180"
 
@@ -214,7 +214,7 @@ jobs:
           set -euo pipefail
 
           if ! grep -q 'telemetry accepted' logs/endpoint.log; then
-            echo 'Authorizer log does not show accepted telemetry' >&2
+            echo 'Endpoint log does not show accepted telemetry' >&2
             exit 1
           fi
 
