@@ -1,6 +1,6 @@
 import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
 import { describe, expect, it } from 'vitest';
-import { createFakePayload, parseFakeSensorCliOptions } from '../src/index.js';
+import { createFakeEnvelopePayload, parseFakeSensorCliOptions } from '../src/index.js';
 
 describe('fake sensor CLI', () => {
   it('parses args with defaults', async () => {
@@ -46,13 +46,11 @@ describe('fake sensor CLI', () => {
     });
   });
 
-  it('creates fake payload with expected shape', () => {
-    const payload = createFakePayload('5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt');
-    expect(payload.sensor_id).toBe('5DoHTsjp9DN9KEabruKS8p8wAAVHgrEiJ9vtyjAuGEMZqpWt');
-    expect(typeof payload.timestamp).toBe('string');
-    expect(typeof payload.nonce).toBe('string');
-    expect(typeof payload.measurements.temperature_c).toBe('number');
-    expect(typeof payload.measurements.humidity_pct).toBe('number');
+  it('creates fake signed protobuf envelope', () => {
+    const payload = createFakeEnvelopePayload('0x0101010101010101010101010101010101010101010101010101010101010101');
+    expect(payload.envelopeBytes.length).toBeGreaterThan(0);
+    expect(payload.sensorAddress).toBe('5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS');
+    expect(payload.nonce.length).toBe(16);
   });
 
   it('throws for invalid numeric options', () => {

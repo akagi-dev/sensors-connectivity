@@ -1,7 +1,7 @@
 # WP-02 — `authorizer`
 
 ## Summary
-WP-02 implements trusted telemetry ingress at `POST /v1/telemetry`. The service validates request structure and anti-replay/security checks, verifies Ed25519 signatures using canonical hashing rules, and authorizes sensors against the Redis projection. Authorized events are published to Kafka, and `202` is returned only after broker acknowledgment.
+WP-02 implements trusted telemetry ingress at `POST /v1/telemetry`. The service validates protobuf `SignedEnvelope` payloads, verifies Ed25519 signatures over raw envelope bytes (`sensor_id || timestamp_le || nonce || message`), and authorizes sensors against the Redis projection. Authorized events are published to Kafka, and `202` is returned only after broker acknowledgment.
 
 ## Current status snapshot
 - Implemented: ingress route scaffold, schema validation, Redis-backed sensor/nonce checks, signature verification path, `401/403/409/503/202` response mapping.
@@ -28,12 +28,9 @@ Deliver a working Authorizer ingress path that:
 ## Inputs & Outputs
 ### Inputs
 - HTTP endpoint: `POST /v1/telemetry`.
-- Request body fields:
-  - `measurements`
-  - `sensor_id`
-  - `timestamp`
-  - `nonce`
-  - `signature`
+- Request body:
+  - protobuf `crypto.v1.SignedEnvelope` (`application/protobuf`)
+  - optional JSON wrapper with base64 `envelope`
 - Redis projection from WP-01 for sensor/key status.
 
 ### Outputs
@@ -49,11 +46,11 @@ Deliver a working Authorizer ingress path that:
 
 ## Detailed tasks / Implementation checklist
 - [x] Replace Authorizer stubs/TODOs with real handler implementation for `POST /v1/telemetry`.
-- [x] Validate required fields, RFC3339 UTC timestamp format, and request size/limits.
-- [x] Implement deterministic canonicalization for `measurements` and signature verification:
-  - `canonical_measurements || timestamp || nonce || sensor_id`
+- [x] Validate protobuf envelope fields (`sensor_id`, `timestamp`, `nonce`, `message`, `signature`).
+- [x] Implement binary signature verification:
+  - `sensor_id || timestamp_le || nonce || message`
   - verify Ed25519 signature against resolved public key.
-- [x] Enforce timestamp window policy and replay protection using ingress idempotency key (`sensor_id` + `nonce`).
+- [x] Enforce timestamp window policy and replay protection using binary-safe dedup key (`hex(sensor_id):hex(nonce)`).
 - [x] Read sensor/key status from Redis projection; reject disabled/unauthorized keys.
 - [x] Publish accepted requests to `telemetry.authorized.v1` with canonical envelope/payload from WP-00.
 - [x] Publish rejections to `telemetry.rejected.v1` with reason code/message.
@@ -62,7 +59,7 @@ Deliver a working Authorizer ingress path that:
 - [x] Add health/metrics endpoint and structured logging with `event_id`/`trace_id` correlation.
 
 ## Idempotency & error handling
-- Ingest dedup key: `sensor_id` + `nonce`.
+- Ingest dedup key: `hex(sensor_id)` + `hex(nonce)`.
 - Duplicate nonce for same sensor must return `409 Conflict`.
 - Signature mismatch must return `401 Unauthorized`.
 - Unauthorized/disabled sensor/key status must return `403 Forbidden`.

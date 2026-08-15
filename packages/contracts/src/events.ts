@@ -1,13 +1,35 @@
 import { z } from 'zod';
-import { rfc3339Schema } from './envelope.js';
+import {
+  decodeBase64OrHex,
+  MAX_NONCE_LENGTH,
+  MIN_NONCE_LENGTH,
+  SENSOR_ID_LENGTH,
+  SIGNATURE_LENGTH
+} from './protobuf.js';
+
+const binaryStringSchema = z.string().min(1).refine((value) => {
+  try {
+    decodeBase64OrHex(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Expected base64 or hex-encoded bytes');
+
+const fixedLengthBinaryStringSchema = (bytes: number, name: string) =>
+  binaryStringSchema.refine((value) => decodeBase64OrHex(value).length === bytes, `${name} must be ${bytes} bytes`);
 
 export const telemetryAuthorizedPayloadSchema = z
   .object({
-    sensor_id: z.string().min(1),
-    timestamp: rfc3339Schema,
-    nonce: z.string().min(1),
-    measurements: z.record(z.unknown()),
-    signature: z.string().min(1),
+    sensor_id: fixedLengthBinaryStringSchema(SENSOR_ID_LENGTH, 'sensor_id'),
+    timestamp: z.number().int().nonnegative(),
+    nonce: binaryStringSchema.refine((value) => {
+      const bytes = decodeBase64OrHex(value);
+      return bytes.length >= MIN_NONCE_LENGTH && bytes.length <= MAX_NONCE_LENGTH;
+    }, `nonce must be ${MIN_NONCE_LENGTH}-${MAX_NONCE_LENGTH} bytes`),
+    message: binaryStringSchema,
+    signature: fixedLengthBinaryStringSchema(SIGNATURE_LENGTH, 'signature'),
+    envelope: binaryStringSchema.optional(),
     extensions: z.record(z.unknown()).optional()
   })
   .strict();

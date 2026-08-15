@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package crypto.v1;
+
+message Encrypted {
+  uint32 version = 1;
+  string algorithm = 2;
+  bytes from = 3;
+  bytes nonce = 4;
+  bytes ciphertext = 5;
+}

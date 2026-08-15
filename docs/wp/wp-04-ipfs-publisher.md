@@ -18,7 +18,7 @@ Deliver `ipfs-publisher` as an idempotent Kafka consumer that deterministically 
 ## Inputs & Outputs
 ### Inputs
 - Kafka topic consumed: `telemetry.authorized.v1`.
-- Envelope/payload contracts from WP-00.
+- Envelope/payload contracts from WP-00 (protobuf envelope fields serialized as base64 strings).
 - External system: IPFS node/gateway/pinning service.
 
 ### Outputs

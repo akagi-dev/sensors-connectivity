@@ -1,7 +1,7 @@
 # WP-00 — `@scp/contracts`
 
 ## Summary
-WP-00 establishes the shared integration foundation for the telemetry pipeline: canonical event envelope, versioned topic constants, payload schemas, and reusable consumer runtime behavior. Every downstream service depends on these contracts to avoid drift and incompatible message handling. Completing this WP freezes `v1` boundaries so other WPs can implement logic against stable interfaces.
+WP-00 establishes the shared integration foundation for the telemetry pipeline: canonical event envelope, protobuf-aware payload schemas, versioned topic constants, and reusable consumer runtime behavior. Every downstream service depends on these contracts to avoid drift and incompatible message handling. Completing this WP freezes `v1` boundaries so other WPs can implement logic against stable interfaces.
 
 ## Depends on
 - —

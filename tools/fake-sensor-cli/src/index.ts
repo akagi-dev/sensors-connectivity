@@ -1,7 +1,18 @@
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import { canonicalize } from 'json-canonicalize';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { create, toBinary } from '@bufbuild/protobuf';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import {
+  BME280Schema,
+  HumiditySchema,
+  MessageSchema,
+  TemperatureSchema,
+  UrbanSensorSchema,
+  UrbanSchema,
+  buildEnvelopeSigningBytes,
+  createSignedEnvelope,
+  toSignedEnvelopeBytes
+} from '@scp/contracts';
 import pino from 'pino';
 
 export interface FakeSensorCliOptions {
@@ -116,16 +127,11 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   return options;
 }
 
-export function createFakePayload(sensorId: string) {
-  return {
-    sensor_id: sensorId,
-    timestamp: new Date().toISOString(),
-    nonce: randomUUID(),
-    measurements: {
-      temperature_c: Number((18 + Math.random() * 8).toFixed(2)),
-      humidity_pct: Number((30 + Math.random() * 40).toFixed(2))
-    }
-  };
+export interface FakeEnvelopePayload {
+  envelopeBytes: Uint8Array;
+  sensorAddress: string;
+  timestamp: bigint;
+  nonce: Uint8Array;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
@@ -162,15 +168,62 @@ function parseSeedHex(seedHex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(normalizedSeed, 'hex'));
 }
 
-function signPayload(
-  payload: ReturnType<typeof createFakePayload>,
-  signerSeedHex: string
-): string {
+export function createFakeEnvelopePayload(signerSeedHex: string): FakeEnvelopePayload {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
-  const canonicalMeasurements = canonicalize(payload.measurements);
-  const message = `${canonicalMeasurements}${payload.timestamp}${payload.nonce}${payload.sensor_id}`;
-  const signature = ed25519Sign(new TextEncoder().encode(message), pair);
-  return Buffer.from(signature).toString('base64');
+  const temperature = Number((18 + Math.random() * 8).toFixed(2));
+  const humidity = Number((30 + Math.random() * 40).toFixed(2));
+  const message = create(MessageSchema, {
+    metadata: {
+      owner: pair.publicKey
+    },
+    payload: {
+      case: 'urban',
+      value: create(UrbanSchema, {
+        public: [
+          create(UrbanSensorSchema, {
+            sensor: {
+              case: 'bme280',
+              value: create(BME280Schema, {
+                measurement: {
+                  case: 'temperature',
+                  value: create(TemperatureSchema, { celsius: temperature })
+                }
+              })
+            }
+          }),
+          create(UrbanSensorSchema, {
+            sensor: {
+              case: 'bme280',
+              value: create(BME280Schema, {
+                measurement: {
+                  case: 'humidity',
+                  value: create(HumiditySchema, { percent: humidity })
+                }
+              })
+            }
+          })
+        ]
+      })
+    }
+  });
+
+  const messageBytes = toBinary(MessageSchema, message);
+  const timestamp = BigInt(Date.now());
+  const nonce = randomBytes(16);
+  const envelope = createSignedEnvelope({
+    sensorId: pair.publicKey,
+    timestamp,
+    nonce,
+    message: messageBytes
+  });
+  const signature = ed25519Sign(buildEnvelopeSigningBytes(envelope), pair);
+  envelope.signature = signature;
+  return {
+    envelopeBytes: toSignedEnvelopeBytes(envelope),
+    sensorAddress: encodeAddress(pair.publicKey),
+    timestamp,
+    nonce
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -213,13 +266,9 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
   }
 
   for (let i = 0; i < options.count; i += 1) {
-    const unsignedPayload = createFakePayload(options.sensorId);
-    const payload = {
-      ...unsignedPayload,
-      signature: signPayload(unsignedPayload, options.signerSeedHex)
-    };
+    const payload = createFakeEnvelopePayload(options.signerSeedHex);
     const headers: Record<string, string> = {
-      'content-type': 'application/json; charset=utf-8',
+      'content-type': 'application/protobuf',
       'x-request-id': randomUUID()
     };
 
@@ -230,14 +279,16 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
     logInfo('sending telemetry payload', {
       iteration: i + 1,
       total: options.count,
-      payload
+      sensor_id: payload.sensorAddress,
+      timestamp: Number(payload.timestamp),
+      nonce_hex: Buffer.from(payload.nonce).toString('hex')
     });
 
     try {
       const response = await fetch(options.endpointUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload)
+        body: Buffer.from(payload.envelopeBytes)
       });
       if (response.ok) {
         logInfo('response received', { status: response.status, statusText: response.statusText });

@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package core.v1;
+
+import "device/v1/urban.proto";
+import "device/v1/insight.proto";
+
+message Meta {
+  bytes owner = 1;
+}
+
+message Message {
+  Meta metadata = 1;
+
+  oneof payload {
+    device.v1.Urban urban = 2;
+    device.v1.Insight insight = 3;
+  }
+}

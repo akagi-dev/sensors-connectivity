@@ -18,6 +18,7 @@ import {
   validateEnvelopeWithKnownPayload,
   validatePayloadForEventType
 } from '../src/validation.js';
+import { createSignedEnvelope, toSignedEnvelopeBytes, validateSignedEnvelope } from '../src/protobuf.js';
 
 describe('contracts', () => {
   it('parses well-formed envelope + authorized payload', () => {
@@ -28,11 +29,11 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'authorizer',
       payload: {
-        sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: { temp: 21.4 },
-        signature: '0xabc'
+        sensor_id: Buffer.alloc(32, 1).toString('base64'),
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: Buffer.from('payload').toString('base64'),
+        signature: Buffer.alloc(64, 3).toString('base64')
       }
     });
 
@@ -103,9 +104,9 @@ describe('contracts', () => {
     expect(() =>
       telemetryAuthorizedPayloadSchema.parse({
         sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: 'invalid',
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: 'invalid',
         signature: '0xabc'
       })
     ).toThrow();
@@ -130,11 +131,11 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'authorizer',
       payload: {
-        sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: { temp: 21.4 },
-        signature: '0xabc'
+        sensor_id: Buffer.alloc(32, 1).toString('base64'),
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: Buffer.from('payload').toString('base64'),
+        signature: Buffer.alloc(64, 3).toString('base64')
       }
     });
     expect(envelopeResult.success).toBe(true);
@@ -153,6 +154,19 @@ describe('contracts', () => {
       payload: {}
     });
     expect(unknownTypeResult.success).toBe(false);
+  });
+
+  it('validates signed envelope protobuf bytes', () => {
+    const envelope = createSignedEnvelope({
+      sensorId: Buffer.alloc(32, 1),
+      timestamp: BigInt(Date.now()),
+      nonce: Buffer.alloc(16, 2),
+      message: Buffer.from('abc'),
+      signature: Buffer.alloc(64, 4)
+    });
+    const parsed = validateSignedEnvelope(toSignedEnvelopeBytes(envelope));
+    expect(parsed.sensorId.length).toBe(32);
+    expect(parsed.signature.length).toBe(64);
   });
 
   it('enforces ordered processing and commit-after-result guardrail', async () => {

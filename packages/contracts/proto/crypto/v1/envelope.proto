@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package crypto.v1;
+
+message SignedEnvelope {
+  bytes sensor_id = 1;
+  uint64 timestamp = 2;
+  bytes nonce = 3;
+  bytes message = 4;
+  bytes signature = 5;
+}
+
+message SignedEnvelopeBatch {
+  repeated SignedEnvelope batch = 1;
+}

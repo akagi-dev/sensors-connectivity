@@ -12,7 +12,7 @@ TypeScript monorepo scaffold for the telemetry pipeline described in:
 - Node.js 20 LTS + TypeScript (strict)
 - pnpm workspaces + Turborepo
 - Fastify, kafkajs, zod
-- `@noble/ed25519`, `json-canonicalize`, node `crypto`
+- `@noble/ed25519`, protobuf-es (`@bufbuild/protobuf`), node `crypto`
 - `kubo-rpc-client`, libp2p + GossipSub, `@polkadot/api`, ioredis
 - tsup, vitest, eslint, prettier
 
@@ -94,7 +94,17 @@ Available options:
 - `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
 - `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
 
-The CLI now sends authorizer-compatible payloads (`sensor_id`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+The CLI now sends binary protobuf `crypto.v1.SignedEnvelope` (`Content-Type: application/protobuf`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+
+## Protocol assets
+
+- Buf module: `buf.build/airalab/sensors-social-proto`
+- Contracts helper exposes generated protobuf bindings under `packages/contracts/src/proto/`
+- Sync local proto source snapshot from Buf when available:
+
+```bash
+pnpm --filter @scp/contracts proto:sync
+```
 
 ## Service overview
 
