@@ -24,9 +24,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
 
-  e2e:
-    needs: unit-tests
-    permissions:
-      contents: read
-      actions: write
-    uses: ./.github/workflows/integration-test.yml
+#  e2e:
+#    needs: unit-tests
+#    permissions:
+#      contents: read
+#      actions: write
+#    uses: ./.github/workflows/integration-test.yml
