@@ -4,7 +4,9 @@ import type { RegistrySyncConfig } from '../src/config.js';
 import { createRedisKeyspace } from '../src/keyspace.js';
 import { FakeRedis, FixtureEventSource } from './test-helpers.js';
 
-function testConfig(overrides: Partial<RegistrySyncConfig> = {}): RegistrySyncConfig {
+function testConfig(
+  overrides: Partial<RegistrySyncConfig> = {}
+): RegistrySyncConfig {
   return {
     substrateWsUrl: 'ws://unused',
     redisUrl: 'redis://unused',
@@ -14,7 +16,7 @@ function testConfig(overrides: Partial<RegistrySyncConfig> = {}): RegistrySyncCo
     maxRetries: 3,
     retryBackoffMs: 1,
     nonceTtlSeconds: 900,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -28,22 +30,22 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-a'
+        sensorId: 'sensor-a',
       },
       {
         blockHeight: 200,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-a'
-      }
+        sensorId: 'sensor-a',
+      },
     ]);
 
     const service = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();
@@ -65,15 +67,15 @@ describe('registry sync service processing', () => {
         eventIndex: 1,
         section: 'registry',
         method: 'AuthorizationUpdated',
-        sensorId: 'sensor-b'
-      }
+        sensorId: 'sensor-b',
+      },
     ]);
 
     const service = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();
@@ -91,22 +93,22 @@ describe('registry sync service processing', () => {
         blockHeight: 202,
         eventIndex: 2,
         section: 'registry',
-        method: 'AuthorizationUpdated'
+        method: 'AuthorizationUpdated',
       },
       {
         blockHeight: 203,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-d'
-      }
+        sensorId: 'sensor-d',
+      },
     ]);
 
     const service = createRegistrySyncService({
       config: testConfig({ maxRetries: 2 }),
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();
@@ -116,7 +118,6 @@ describe('registry sync service processing', () => {
     expect(await redis.get(keys.cursorHeight)).toBe('203');
     expect(redis.getList(keys.dlqEvents)).toHaveLength(1);
   });
-
 
   it('tracks latest finalized head even without registry events', async () => {
     const redis = new FakeRedis();
@@ -131,19 +132,23 @@ describe('registry sync service processing', () => {
       async getLatestFinalizedHeight() {
         return 500;
       },
-      async startFrom(_fromInclusiveHeight: number, _onEvent: (event: never) => Promise<void>, onFinalizedHead?: (height: number) => Promise<void> | void) {
+      async startFrom(
+        _fromInclusiveHeight: number,
+        _onEvent: (event: never) => Promise<void>,
+        onFinalizedHead?: (height: number) => Promise<void> | void
+      ) {
         await onFinalizedHead?.(505);
       },
       async stop() {
         return;
-      }
+      },
     };
 
     const service = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();
@@ -178,14 +183,14 @@ describe('registry sync service processing', () => {
       },
       async stop() {
         return;
-      }
+      },
     };
 
     const firstService = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: firstSource,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await firstService.start();
@@ -214,14 +219,14 @@ describe('registry sync service processing', () => {
       },
       async stop() {
         return;
-      }
+      },
     };
 
     const secondService = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: secondSource,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await secondService.start();
@@ -241,22 +246,22 @@ describe('registry sync service processing', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-old'
+        sensorId: 'sensor-old',
       },
       {
         blockHeight: 300,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-new'
-      }
+        sensorId: 'sensor-new',
+      },
     ]);
 
     const service = createRegistrySyncService({
       config: testConfig(),
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();

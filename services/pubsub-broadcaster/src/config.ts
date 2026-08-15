@@ -25,7 +25,9 @@ function parseCsvEnv(value: string | undefined): string[] {
     .filter((item) => item.length > 0);
 }
 
-export function loadPubsubBroadcasterConfig(env: NodeJS.ProcessEnv = process.env): PubsubBroadcasterConfig {
+export function loadPubsubBroadcasterConfig(
+  env: NodeJS.ProcessEnv = process.env
+): PubsubBroadcasterConfig {
   return {
     kafkaBrokers: (env.KAFKA_BROKERS ?? 'localhost:9092')
       .split(',')
@@ -35,8 +37,11 @@ export function loadPubsubBroadcasterConfig(env: NodeJS.ProcessEnv = process.env
     source: env.PUBSUB_BROADCASTER_SOURCE ?? 'pubsub-broadcaster',
     healthPort: parsePositiveInt(env.PUBSUB_BROADCASTER_HEALTH_PORT, 3020),
     maxRetries: parsePositiveInt(env.PUBSUB_BROADCASTER_MAX_RETRIES, 3),
-    retryBackoffMs: parsePositiveInt(env.PUBSUB_BROADCASTER_RETRY_BACKOFF_MS, 250),
+    retryBackoffMs: parsePositiveInt(
+      env.PUBSUB_BROADCASTER_RETRY_BACKOFF_MS,
+      250
+    ),
     pubsubTopic: env.PUBSUB_TOPIC ?? 'telemetry/authorized/v1',
-    reservedPeers: parseCsvEnv(env.PUBSUB_RESERVED_PEERS)
+    reservedPeers: parseCsvEnv(env.PUBSUB_RESERVED_PEERS),
   };
 }

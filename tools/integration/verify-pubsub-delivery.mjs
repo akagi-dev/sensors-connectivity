@@ -25,7 +25,10 @@ function parseArgs(args) {
 
   if (mode === 'collect') {
     const topic = values.get('topic') ?? 'telemetry/authorized/v1';
-    const expectedCount = Number.parseInt(values.get('expected-count') ?? '', 10);
+    const expectedCount = Number.parseInt(
+      values.get('expected-count') ?? '',
+      10
+    );
     const timeoutMs = Number.parseInt(values.get('timeout-ms') ?? '', 10);
     const outputFile = values.get('output-file');
     const ipfsApiUrl = values.get('ipfs-api-url') ?? 'http://127.0.0.1:5001';
@@ -48,7 +51,7 @@ function parseArgs(args) {
       timeoutMs,
       outputFile,
       ipfsApiUrl,
-      sensorId
+      sensorId,
     };
   }
 
@@ -70,7 +73,7 @@ function parseArgs(args) {
     mode,
     fakeSensorLogFile,
     pubsubMessagesFile,
-    expectedCount
+    expectedCount,
   };
 }
 
@@ -102,11 +105,13 @@ async function collectMessages(options) {
   const endpoint = `${options.ipfsApiUrl}/api/v0/pubsub/sub?arg=${encodeURIComponent(options.topic)}`;
   const response = await fetch(endpoint, {
     method: 'POST',
-    signal: controller.signal
+    signal: controller.signal,
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`failed to subscribe to IPFS pubsub: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `failed to subscribe to IPFS pubsub: ${response.status} ${response.statusText}`
+    );
   }
 
   const reader = response.body.getReader();
@@ -140,7 +145,9 @@ async function collectMessages(options) {
         }
 
         payloads.push(payload);
-        console.log(`received ${payloads.length}/${options.expectedCount} topic messages`);
+        console.log(
+          `received ${payloads.length}/${options.expectedCount} topic messages`
+        );
 
         if (payloads.length >= options.expectedCount) {
           break;
@@ -157,7 +164,11 @@ async function collectMessages(options) {
     reader.releaseLock();
   }
 
-  await writeFile(options.outputFile, `${JSON.stringify(payloads, null, 2)}\n`, 'utf8');
+  await writeFile(
+    options.outputFile,
+    `${JSON.stringify(payloads, null, 2)}\n`,
+    'utf8'
+  );
 
   if (payloads.length < options.expectedCount) {
     throw new Error(
@@ -176,10 +187,14 @@ function parseExpectedFromFakeSensorLog(rawLog) {
 
     try {
       const entry = JSON.parse(line);
-      if (entry.msg === 'sending telemetry payload' && entry.sensor_id && entry.nonce_hex) {
+      if (
+        entry.msg === 'sending telemetry payload' &&
+        entry.sensor_id &&
+        entry.nonce_hex
+      ) {
         expected.push({
           sensor_id: entry.sensor_id,
-          nonce_hex: entry.nonce_hex
+          nonce_hex: entry.nonce_hex,
         });
       }
     } catch {
@@ -212,7 +227,7 @@ async function verifyMessages(options) {
   await cryptoWaitReady();
   const [fakeSensorLog, pubsubMessagesRaw] = await Promise.all([
     readFile(options.fakeSensorLogFile, 'utf8'),
-    readFile(options.pubsubMessagesFile, 'utf8')
+    readFile(options.pubsubMessagesFile, 'utf8'),
   ]);
 
   const expected = parseExpectedFromFakeSensorLog(fakeSensorLog);
@@ -228,7 +243,9 @@ async function verifyMessages(options) {
   }
 
   assertDelivery(expected, received);
-  console.log(`verified ${expected.length} pubsub messages match fake-sensor payloads`);
+  console.log(
+    `verified ${expected.length} pubsub messages match fake-sensor payloads`
+  );
 }
 
 async function main() {

@@ -14,7 +14,7 @@ export class WhitelistAuth implements SensorAuth {
   constructor(allowedSensorIds: string[]) {
     this.allowedSensors = new Set(allowedSensorIds);
     logInfo('whitelist auth initialized', {
-      sensor_count: this.allowedSensors.size
+      sensor_count: this.allowedSensors.size,
     });
   }
 
@@ -28,7 +28,7 @@ export class WhitelistAuth implements SensorAuth {
     const allowed = this.allowedSensors.has(sensorId);
     logDebug('whitelist authentication check', {
       sensor_id: sensorId,
-      allowed
+      allowed,
     });
     return allowed;
   }
@@ -56,7 +56,7 @@ export class WhitelistAuth implements SensorAuth {
     this.nonces.add(key);
     logDebug('nonce remembered', {
       sensor_id: sensorId,
-      nonce
+      nonce,
     });
   }
 

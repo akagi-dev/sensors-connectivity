@@ -12,7 +12,9 @@ describe('heartbeat tracker config', () => {
   });
 
   it('respects HEARTBEAT_TRACKER_ONLINE_WINDOW_MS override', () => {
-    const config = loadHeartbeatTrackerConfig({ HEARTBEAT_TRACKER_ONLINE_WINDOW_MS: '45000' });
+    const config = loadHeartbeatTrackerConfig({
+      HEARTBEAT_TRACKER_ONLINE_WINDOW_MS: '45000',
+    });
 
     expect(config.onlineWindowMs).toBe(45000);
     expect(config.retentionWindowMs).toBe(450000); // 10x online window
@@ -21,7 +23,7 @@ describe('heartbeat tracker config', () => {
   it('respects HEARTBEAT_TRACKER_RETENTION_WINDOW_MS override', () => {
     const config = loadHeartbeatTrackerConfig({
       HEARTBEAT_TRACKER_ONLINE_WINDOW_MS: '30000',
-      HEARTBEAT_TRACKER_RETENTION_WINDOW_MS: '600000'
+      HEARTBEAT_TRACKER_RETENTION_WINDOW_MS: '600000',
     });
 
     expect(config.onlineWindowMs).toBe(30000);
@@ -31,7 +33,7 @@ describe('heartbeat tracker config', () => {
   it('respects HEARTBEAT_TRACKER_REDIS_PREFIX override', () => {
     const config = loadHeartbeatTrackerConfig({
       REDIS_URL: 'redis://redis.internal:6379',
-      HEARTBEAT_TRACKER_REDIS_PREFIX: 'heartbeat-tracker:prod'
+      HEARTBEAT_TRACKER_REDIS_PREFIX: 'heartbeat-tracker:prod',
     });
 
     expect(config.redisUrl).toBe('redis://redis.internal:6379');

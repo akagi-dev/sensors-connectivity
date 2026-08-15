@@ -8,8 +8,16 @@ export interface DedupStore {
 }
 
 export interface RetryDlqPublisher<TEvent> {
-  publishRetry(event: TEvent, reason: string, context?: FailureContext): Promise<void>;
-  publishDlq(event: TEvent, reason: string, context?: FailureContext): Promise<void>;
+  publishRetry(
+    event: TEvent,
+    reason: string,
+    context?: FailureContext
+  ): Promise<void>;
+  publishDlq(
+    event: TEvent,
+    reason: string,
+    context?: FailureContext
+  ): Promise<void>;
 }
 
 export interface FailureContext {
@@ -60,7 +68,8 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
   event: TEvent,
   handlers: ConsumerFlowHandlers<TEvent, TResultEvent>
 ): Promise<'processed' | 'duplicate' | 'retried' | 'dlq'> {
-  const maxAttempts = handlers.retryPolicy?.maxAttempts ?? (handlers.maxRetries ?? 3);
+  const maxAttempts =
+    handlers.retryPolicy?.maxAttempts ?? handlers.maxRetries ?? 3;
   const eventIdFromRetryPolicy = handlers.retryPolicy?.getEventId(event);
 
   if (handlers.dedup) {
@@ -80,7 +89,8 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
   if (handlers.idempotency) {
     const eventId = handlers.idempotency.getEventId(event);
     if (eventId && (await handlers.idempotency.hasProcessed(eventId))) {
-      if (handlers.retryPolicy && eventIdFromRetryPolicy) await handlers.retryPolicy.store.clearAttempts(eventIdFromRetryPolicy);
+      if (handlers.retryPolicy && eventIdFromRetryPolicy)
+        await handlers.retryPolicy.store.clearAttempts(eventIdFromRetryPolicy);
       await handlers.commitOffset();
       return 'duplicate';
     }
@@ -96,7 +106,10 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
     if (handlers.dedup) {
       const keyValue = handlers.dedup.getKeyValue(event);
       if (keyValue) {
-        await handlers.dedup.store.setProcessed(handlers.dedup.keyType, keyValue);
+        await handlers.dedup.store.setProcessed(
+          handlers.dedup.keyType,
+          keyValue
+        );
       }
     }
 
@@ -114,17 +127,25 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
     await handlers.commitOffset();
     return 'processed';
   } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Unknown processing error';
-    const attempt = await nextAttempt(eventIdFromRetryPolicy, handlers.retryPolicy);
+    const reason =
+      error instanceof Error ? error.message : 'Unknown processing error';
+    const attempt = await nextAttempt(
+      eventIdFromRetryPolicy,
+      handlers.retryPolicy
+    );
 
-    if (handlers.retryPolicy && eventIdFromRetryPolicy && attempt < maxAttempts) {
+    if (
+      handlers.retryPolicy &&
+      eventIdFromRetryPolicy &&
+      attempt < maxAttempts
+    ) {
       const context: FailureContext = {
         topic: TELEMETRY_TOPICS.RETRY,
         reason,
         eventId: eventIdFromRetryPolicy,
         attempt,
         maxAttempts,
-        failedAt: new Date().toISOString()
+        failedAt: new Date().toISOString(),
       };
       await handlers.retryDlqPublisher.publishRetry(
         event,
@@ -140,7 +161,7 @@ export async function runConsumerProcessingRule<TEvent, TResultEvent>(
       eventId: eventIdFromRetryPolicy,
       attempt,
       maxAttempts,
-      failedAt: new Date().toISOString()
+      failedAt: new Date().toISOString(),
     };
     await handlers.retryDlqPublisher.publishDlq(
       event,

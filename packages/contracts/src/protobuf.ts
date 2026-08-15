@@ -13,7 +13,8 @@ export const SIGNATURE_LENGTH = 64;
 export const MIN_NONCE_LENGTH = 16;
 export const MAX_NONCE_LENGTH = 32;
 
-const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const base64Pattern =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export function decodeBase64(input: string): Uint8Array {
   const normalized = input.trim();
@@ -47,12 +48,14 @@ export function concatBytes(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-export function buildEnvelopeSigningBytes(envelope: Pick<SignedEnvelope, 'sensorId' | 'timestamp' | 'nonce' | 'message'>): Uint8Array {
+export function buildEnvelopeSigningBytes(
+  envelope: Pick<SignedEnvelope, 'sensorId' | 'timestamp' | 'nonce' | 'message'>
+): Uint8Array {
   return concatBytes([
     envelope.sensorId,
     timestampToLeBytes(envelope.timestamp),
     envelope.nonce,
-    envelope.message
+    envelope.message,
   ]);
 }
 
@@ -70,7 +73,10 @@ function encodeVarint(value: bigint): Uint8Array {
   return Uint8Array.from(chunks);
 }
 
-function decodeVarint(bytes: Uint8Array, start: number): { value: bigint; nextOffset: number } {
+function decodeVarint(
+  bytes: Uint8Array,
+  start: number
+): { value: bigint; nextOffset: number } {
   let value = 0n;
   let shift = 0n;
   let offset = start;
@@ -96,7 +102,10 @@ function encodeLengthDelimited(bytes: Uint8Array): Uint8Array {
   return concatBytes([encodeVarint(BigInt(bytes.length)), bytes]);
 }
 
-function readLengthDelimited(bytes: Uint8Array, start: number): { value: Uint8Array; nextOffset: number } {
+function readLengthDelimited(
+  bytes: Uint8Array,
+  start: number
+): { value: Uint8Array; nextOffset: number } {
   const { value: length, nextOffset } = decodeVarint(bytes, start);
   const size = Number(length);
   if (!Number.isSafeInteger(size) || size < 0) {
@@ -115,7 +124,7 @@ function decodeSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
     timestamp: 0n,
     nonce: new Uint8Array(),
     message: new Uint8Array(),
-    signature: new Uint8Array()
+    signature: new Uint8Array(),
   };
   let offset = 0;
   while (offset < bytes.length) {
@@ -174,8 +183,13 @@ export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
   if (envelope.signature.length !== SIGNATURE_LENGTH) {
     throw new Error(`signature must be ${SIGNATURE_LENGTH} bytes`);
   }
-  if (envelope.nonce.length < MIN_NONCE_LENGTH || envelope.nonce.length > MAX_NONCE_LENGTH) {
-    throw new Error(`nonce must be ${MIN_NONCE_LENGTH}-${MAX_NONCE_LENGTH} bytes`);
+  if (
+    envelope.nonce.length < MIN_NONCE_LENGTH ||
+    envelope.nonce.length > MAX_NONCE_LENGTH
+  ) {
+    throw new Error(
+      `nonce must be ${MIN_NONCE_LENGTH}-${MAX_NONCE_LENGTH} bytes`
+    );
   }
   if (envelope.message.length === 0) {
     throw new Error('message must be non-empty');
@@ -183,7 +197,9 @@ export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
   return envelope;
 }
 
-export function extractSensorId(envelope: Pick<SignedEnvelope, 'sensorId'>): string {
+export function extractSensorId(
+  envelope: Pick<SignedEnvelope, 'sensorId'>
+): string {
   return encodeAddress(envelope.sensorId, 32);
 }
 
@@ -198,7 +214,7 @@ export function toSignedEnvelopeBytes(envelope: SignedEnvelope): Uint8Array {
     Uint8Array.from([0x22]),
     encodeLengthDelimited(envelope.message),
     Uint8Array.from([0x2a]),
-    encodeLengthDelimited(envelope.signature)
+    encodeLengthDelimited(envelope.signature),
   ]);
 }
 
@@ -214,6 +230,6 @@ export function createSignedEnvelope(input: {
     timestamp: input.timestamp ?? 0n,
     nonce: input.nonce ?? new Uint8Array(),
     message: input.message ?? new Uint8Array(),
-    signature: input.signature ?? new Uint8Array()
+    signature: input.signature ?? new Uint8Array(),
   };
 }

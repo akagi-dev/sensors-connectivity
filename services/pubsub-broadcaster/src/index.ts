@@ -6,15 +6,23 @@ import {
   validateEnvelopeWithKnownPayload,
   type Envelope,
   type RetryDlqPublisher,
-  type TelemetryAuthorizedPayload
+  type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
-import { Kafka, type Consumer, type EachBatchPayload, type Producer } from 'kafkajs';
+import {
+  Kafka,
+  type Consumer,
+  type EachBatchPayload,
+  type Producer,
+} from 'kafkajs';
 import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createLibp2p } from 'libp2p';
 import pino from 'pino';
-import { loadPubsubBroadcasterConfig, type PubsubBroadcasterConfig } from './config.js';
+import {
+  loadPubsubBroadcasterConfig,
+  type PubsubBroadcasterConfig,
+} from './config.js';
 
 interface PubsubBroadcasterMetrics {
   consumed: number;
@@ -60,7 +68,10 @@ interface PubsubBroadcasterDeps {
   createPublisher?: () => EnvelopePublisher;
   createConsumer?: () => Consumer;
   idempotencyStore?: EventIdStore;
-  createHealthServer?: (metrics: PubsubBroadcasterMetrics, port: number) => Server;
+  createHealthServer?: (
+    metrics: PubsubBroadcasterMetrics,
+    port: number
+  ) => Server;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -87,7 +98,8 @@ interface ProcessingContext {
 
 const logger = pino({
   name: 'pubsub-broadcaster',
-  level: process.env.PUBSUB_BROADCASTER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.PUBSUB_BROADCASTER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -98,11 +110,15 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
@@ -123,18 +139,21 @@ export async function processAuthorizedEnvelope(
       retryPolicy: {
         maxAttempts: context.config.maxRetries,
         getEventId: (current) => current.event_id,
-        store: context.retryStore
+        store: context.retryStore,
       },
       idempotency: {
         getEventId: (current) => current.event_id,
         hasProcessed: (eventId) => context.idempotencyStore.has(eventId),
-        markProcessed: (eventId) => context.idempotencyStore.mark(eventId)
+        markProcessed: (eventId) => context.idempotencyStore.mark(eventId),
       },
       performExternalAction: async (current) => {
         const encodedPayload = Buffer.from(JSON.stringify(current.payload));
 
         try {
-          await context.pubsub.publish(context.config.pubsubTopic, encodedPayload);
+          await context.pubsub.publish(
+            context.config.pubsubTopic,
+            encodedPayload
+          );
           context.metrics.publishSuccess += 1;
         } catch (error) {
           context.metrics.publishFailure += 1;
@@ -143,7 +162,8 @@ export async function processAuthorizedEnvelope(
           }
 
           publishStatus = 'failed';
-          publishError = error instanceof Error ? error : new Error('Unknown publish error');
+          publishError =
+            error instanceof Error ? error : new Error('Unknown publish error');
         }
       },
       waitForConfirmation: async () => {},
@@ -162,10 +182,10 @@ export async function processAuthorizedEnvelope(
           ...(publishError
             ? {
                 error_code: 'publish_failed',
-                error_message: publishError.message
+                error_message: publishError.message,
               }
-            : {})
-        }
+            : {}),
+        },
       }),
       publishResultEvent: async (result) => {
         await context.publisher.publish(
@@ -175,7 +195,7 @@ export async function processAuthorizedEnvelope(
         );
       },
       commitOffset,
-      retryDlqPublisher: createRetryDlqPublisher(context)
+      retryDlqPublisher: createRetryDlqPublisher(context),
     });
 
     if (status === 'retried') {
@@ -210,13 +230,21 @@ export function createPubsubBroadcasterService(
   config: PubsubBroadcasterConfig = loadPubsubBroadcasterConfig(),
   deps: PubsubBroadcasterDeps = {}
 ): PubsubBroadcasterService {
-  const kafka = new Kafka({ clientId: 'pubsub-broadcaster', brokers: config.kafkaBrokers });
-  const consumer = deps.createConsumer?.() ?? kafka.consumer({ groupId: config.consumerGroupId });
-  const publisher = deps.createPublisher?.() ?? createKafkaEnvelopePublisher(kafka.producer());
+  const kafka = new Kafka({
+    clientId: 'pubsub-broadcaster',
+    brokers: config.kafkaBrokers,
+  });
+  const consumer =
+    deps.createConsumer?.() ??
+    kafka.consumer({ groupId: config.consumerGroupId });
+  const publisher =
+    deps.createPublisher?.() ?? createKafkaEnvelopePublisher(kafka.producer());
   const idempotencyStore = deps.idempotencyStore ?? new InMemoryEventIdStore();
   const retryStore = new InMemoryRetryCounterStore();
-  const createPubsubClient = deps.createPubsubClient ?? (() => createLibp2pPubsubClient());
-  const createHealthServer = deps.createHealthServer ?? startHealthAndMetricsServer;
+  const createPubsubClient =
+    deps.createPubsubClient ?? (() => createLibp2pPubsubClient());
+  const createHealthServer =
+    deps.createHealthServer ?? startHealthAndMetricsServer;
   const sleepFn = deps.sleep ?? sleep;
 
   let pubsubClient: PubsubClient | null = null;
@@ -230,7 +258,7 @@ export function createPubsubBroadcasterService(
     publishFailure: 0,
     retryCount: 0,
     dlqCount: 0,
-    consumerLag: 0
+    consumerLag: 0,
   };
 
   return {
@@ -246,7 +274,7 @@ export function createPubsubBroadcasterService(
         kafkaBrokers: config.kafkaBrokers,
         pubsubTopic: config.pubsubTopic,
         reservedPeerCount: config.reservedPeers.length,
-        healthPort: config.healthPort
+        healthPort: config.healthPort,
       });
       try {
         pubsubClient = await createPubsubClient();
@@ -254,7 +282,10 @@ export function createPubsubBroadcasterService(
         await pubsubClient.connectReservedPeers(config.reservedPeers);
         await publisher.connect();
         await consumer.connect();
-        await consumer.subscribe({ topic: TELEMETRY_TOPICS.AUTHORIZED, fromBeginning: false });
+        await consumer.subscribe({
+          topic: TELEMETRY_TOPICS.AUTHORIZED,
+          fromBeginning: false,
+        });
         healthServer = createHealthServer(metrics, config.healthPort);
 
         runPromise = consumer.run({
@@ -269,9 +300,9 @@ export function createPubsubBroadcasterService(
               idempotencyStore,
               retryStore,
               metrics,
-              sleep: sleepFn
+              sleep: sleepFn,
             });
-          }
+          },
         });
         logInfo('service started');
       } catch (error) {
@@ -291,7 +322,7 @@ export function createPubsubBroadcasterService(
         await Promise.allSettled([
           consumer.disconnect(),
           publisher.disconnect(),
-          pubsubClient?.stop() ?? Promise.resolve()
+          pubsubClient?.stop() ?? Promise.resolve(),
         ]);
         pubsubClient = null;
         logInfo('startup rollback complete');
@@ -329,7 +360,7 @@ export function createPubsubBroadcasterService(
     },
     getMetrics(): Readonly<PubsubBroadcasterMetrics> {
       return metrics;
-    }
+    },
   };
 }
 
@@ -344,28 +375,34 @@ interface BatchProcessingDeps {
   sleep: (ms: number) => Promise<void>;
 }
 
-async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps): Promise<void> {
+async function processBatch(
+  payload: EachBatchPayload,
+  deps: BatchProcessingDeps
+): Promise<void> {
   for (const message of payload.batch.messages) {
     if (!payload.isRunning() || payload.isStale()) {
       logWarn('batch processing halted by consumer state', {
         topic: payload.batch.topic,
-        partition: payload.batch.partition
+        partition: payload.batch.partition,
       });
       return;
     }
 
     deps.metrics.consumed += 1;
-    const lag = BigInt(payload.batch.highWatermark) - BigInt(message.offset) - 1n;
+    const lag =
+      BigInt(payload.batch.highWatermark) - BigInt(message.offset) - 1n;
     const clampedLag = lag < 0n ? 0n : lag;
     deps.metrics.consumerLag =
-      clampedLag > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(clampedLag);
+      clampedLag > BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number.MAX_SAFE_INTEGER
+        : Number(clampedLag);
     const commitOffset = async () => {
       await deps.consumer.commitOffsets([
         {
           topic: payload.batch.topic,
           partition: payload.batch.partition,
-          offset: incrementOffset(message.offset)
-        }
+          offset: incrementOffset(message.offset),
+        },
       ]);
       payload.resolveOffset(message.offset);
     };
@@ -377,7 +414,7 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
         topic: payload.batch.topic,
         partition: payload.batch.partition,
         offset: message.offset,
-        reason: parsed.error
+        reason: parsed.error,
       });
       await publishInvalidMessageDlq(raw, parsed.error, deps, commitOffset);
       await payload.heartbeat();
@@ -385,7 +422,10 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
     }
 
     const envelopeResult = validateEnvelopeWithKnownPayload(parsed.data);
-    if (!envelopeResult.success || envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
+    if (
+      !envelopeResult.success ||
+      envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED
+    ) {
       const reason = envelopeResult.success
         ? `Unsupported event type: ${envelopeResult.data.event_type}`
         : envelopeResult.error.message;
@@ -393,28 +433,32 @@ async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps
         topic: payload.batch.topic,
         partition: payload.batch.partition,
         offset: message.offset,
-        reason
+        reason,
       });
       await publishInvalidMessageDlq(parsed.data, reason, deps, commitOffset);
       await payload.heartbeat();
       continue;
     }
 
-    const status = await processAuthorizedEnvelope(envelopeResult.data as AuthorizedTelemetryEnvelope, commitOffset, {
-      config: deps.config,
-      pubsub: deps.pubsub,
-      publisher: deps.publisher,
-      idempotencyStore: deps.idempotencyStore,
-      retryStore: deps.retryStore,
-      metrics: deps.metrics
-    });
+    const status = await processAuthorizedEnvelope(
+      envelopeResult.data as AuthorizedTelemetryEnvelope,
+      commitOffset,
+      {
+        config: deps.config,
+        pubsub: deps.pubsub,
+        publisher: deps.publisher,
+        idempotencyStore: deps.idempotencyStore,
+        retryStore: deps.retryStore,
+        metrics: deps.metrics,
+      }
+    );
     logInfo('authorized envelope handled', {
       eventId: envelopeResult.data.event_id,
       traceId: envelopeResult.data.trace_id,
       status,
       topic: payload.batch.topic,
       partition: payload.batch.partition,
-      offset: message.offset
+      offset: message.offset,
     });
     await payload.heartbeat();
   }
@@ -437,13 +481,15 @@ async function publishInvalidMessageDlq(
       failed_topic: TELEMETRY_TOPICS.AUTHORIZED,
       reason_code: 'invalid_envelope',
       reason_message: reason,
-      failed_payload: failedPayload
-    }
+      failed_payload: failedPayload,
+    },
   });
   await commitOffset();
 }
 
-function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<Envelope> {
+function createRetryDlqPublisher(
+  context: ProcessingContext
+): RetryDlqPublisher<Envelope> {
   return {
     publishRetry: async (event, reason, failureContext) => {
       await context.publisher.publish(TELEMETRY_TOPICS.RETRY, event.event_id, {
@@ -458,8 +504,8 @@ function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<
           reason_code: 'transient_publish_error',
           reason_message: reason,
           failed_event: event,
-          context: failureContext
-        }
+          context: failureContext,
+        },
       });
     },
     publishDlq: async (event, reason, failureContext) => {
@@ -475,10 +521,10 @@ function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<
           reason_code: 'publish_failed',
           reason_message: reason,
           failed_event: event,
-          context: failureContext
-        }
+          context: failureContext,
+        },
       });
-    }
+    },
   };
 }
 
@@ -493,7 +539,7 @@ function startHealthAndMetricsServer(
       response.end(
         JSON.stringify({
           status: 'ok',
-          consumer_lag: metrics.consumerLag
+          consumer_lag: metrics.consumerLag,
         })
       );
       return;
@@ -561,19 +607,19 @@ function createKafkaEnvelopePublisher(producer: Producer): EnvelopePublisher {
         messages: [
           {
             key,
-            value: JSON.stringify(envelope)
-          }
-        ]
+            value: JSON.stringify(envelope),
+          },
+        ],
       });
-    }
+    },
   };
 }
 
 async function createLibp2pPubsubClient(): Promise<PubsubClient> {
   const node = await createLibp2p({
     services: {
-      pubsub: gossipsub() as never
-    } as never
+      pubsub: gossipsub() as never,
+    } as never,
   });
 
   const reservedPeers = new Set<string>();
@@ -607,30 +653,45 @@ async function createLibp2pPubsubClient(): Promise<PubsubClient> {
       }, 30_000);
     },
     async publish(topic: string, data: Uint8Array) {
-      await (node.services.pubsub as { publish: (currentTopic: string, currentData: Uint8Array) => Promise<void> }).publish(topic, data);
-    }
+      await (
+        node.services.pubsub as {
+          publish: (
+            currentTopic: string,
+            currentData: Uint8Array
+          ) => Promise<void>;
+        }
+      ).publish(topic, data);
+    },
   };
 }
 
-async function safeDial(node: Awaited<ReturnType<typeof createLibp2p>>, multiaddr: string) {
+async function safeDial(
+  node: Awaited<ReturnType<typeof createLibp2p>>,
+  multiaddr: string
+) {
   try {
-    await (node as unknown as { dial: (target: unknown) => Promise<unknown> }).dial(multiaddr);
+    await (
+      node as unknown as { dial: (target: unknown) => Promise<unknown> }
+    ).dial(multiaddr);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown dial error';
+    const message =
+      error instanceof Error ? error.message : 'Unknown dial error';
     logWarn('reserved peer dial failed', {
       peer: multiaddr,
-      error: message
+      error: message,
     });
   }
 }
 
-function safeJsonParse(raw: string): { success: true; data: unknown } | { success: false; error: string } {
+function safeJsonParse(
+  raw: string
+): { success: true; data: unknown } | { success: false; error: string } {
   try {
     return { success: true, data: JSON.parse(raw) };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON payload'
+      error: error instanceof Error ? error.message : 'Invalid JSON payload',
     };
   }
 }

@@ -1,4 +1,8 @@
-import { cryptoWaitReady, decodeAddress, ed25519Verify } from '@polkadot/util-crypto';
+import {
+  cryptoWaitReady,
+  decodeAddress,
+  ed25519Verify,
+} from '@polkadot/util-crypto';
 import { buildEnvelopeSigningBytes } from '@scp/contracts';
 
 export interface SignatureVerificationInput {

@@ -1,4 +1,9 @@
-import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import {
+  cryptoWaitReady,
+  ed25519PairFromSeed,
+  ed25519Sign,
+  encodeAddress,
+} from '@polkadot/util-crypto';
 import { describe, expect, it } from 'vitest';
 import { buildEnvelopeSigningBytes } from '@scp/contracts';
 import { verifyTelemetrySignature } from '../src/signature.js';
@@ -13,7 +18,7 @@ describe('verifyTelemetrySignature', () => {
       sensorId: pair.publicKey,
       timestamp: BigInt(Date.now()),
       nonce: Uint8Array.from(Buffer.alloc(16, 8)),
-      message: Uint8Array.from(Buffer.from('test-message'))
+      message: Uint8Array.from(Buffer.from('test-message')),
     };
     const signature = ed25519Sign(buildEnvelopeSigningBytes(payload), pair);
 
@@ -21,7 +26,7 @@ describe('verifyTelemetrySignature', () => {
       verifyTelemetrySignature({
         ...payload,
         signature,
-        signerAddress
+        signerAddress,
       })
     ).resolves.toBe(true);
   });
@@ -35,7 +40,7 @@ describe('verifyTelemetrySignature', () => {
       sensorId: pair.publicKey,
       timestamp: BigInt(Date.now()),
       nonce: Uint8Array.from(Buffer.alloc(16, 8)),
-      message: Uint8Array.from(Buffer.from('test-message'))
+      message: Uint8Array.from(Buffer.from('test-message')),
     };
     const signature = ed25519Sign(buildEnvelopeSigningBytes(payload), pair);
 
@@ -44,7 +49,7 @@ describe('verifyTelemetrySignature', () => {
         ...payload,
         message: Uint8Array.from(Buffer.from('mutated')),
         signature,
-        signerAddress
+        signerAddress,
       })
     ).resolves.toBe(false);
   });

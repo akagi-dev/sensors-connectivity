@@ -1,6 +1,9 @@
 import { InMemoryRetryCounterStore, TELEMETRY_TOPICS } from '@scp/contracts';
 import { describe, expect, it } from 'vitest';
-import { processAuthorizedEnvelope, type AuthorizedTelemetryEnvelope } from '../src/index.js';
+import {
+  processAuthorizedEnvelope,
+  type AuthorizedTelemetryEnvelope,
+} from '../src/index.js';
 import type { PubsubBroadcasterConfig } from '../src/config.js';
 
 function makeEnvelope(eventId: string): AuthorizedTelemetryEnvelope {
@@ -16,12 +19,14 @@ function makeEnvelope(eventId: string): AuthorizedTelemetryEnvelope {
       timestamp: Date.parse('2026-01-01T00:00:00Z'),
       nonce: Buffer.alloc(16, 2).toString('base64'),
       message: Buffer.from(JSON.stringify({ temp: 21 })).toString('base64'),
-      signature: Buffer.alloc(64, 3).toString('base64')
-    }
+      signature: Buffer.alloc(64, 3).toString('base64'),
+    },
   };
 }
 
-function makeConfig(overrides: Partial<PubsubBroadcasterConfig> = {}): PubsubBroadcasterConfig {
+function makeConfig(
+  overrides: Partial<PubsubBroadcasterConfig> = {}
+): PubsubBroadcasterConfig {
   return {
     kafkaBrokers: ['localhost:9092'],
     consumerGroupId: 'pubsub-broadcaster-v1',
@@ -31,7 +36,7 @@ function makeConfig(overrides: Partial<PubsubBroadcasterConfig> = {}): PubsubBro
     retryBackoffMs: 0,
     pubsubTopic: 'telemetry/authorized/v1',
     reservedPeers: [],
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -46,7 +51,7 @@ describe('pubsub broadcaster processing', () => {
       publishFailure: 0,
       retryCount: 0,
       dlqCount: 0,
-      consumerLag: 0
+      consumerLag: 0,
     };
 
     const status = await processAuthorizedEnvelope(
@@ -60,23 +65,23 @@ describe('pubsub broadcaster processing', () => {
           async connectReservedPeers() {},
           async publish(topic) {
             publishedTopics.push(topic);
-          }
+          },
         },
         publisher: {
           async connect() {},
           async disconnect() {},
           async publish(topic) {
             resultTopics.push(topic);
-          }
+          },
         },
         idempotencyStore: {
           async has() {
             return false;
           },
-          async mark() {}
+          async mark() {},
         },
         retryStore: new InMemoryRetryCounterStore(),
-        metrics
+        metrics,
       }
     );
 
@@ -95,7 +100,7 @@ describe('pubsub broadcaster processing', () => {
       publishFailure: 0,
       retryCount: 0,
       dlqCount: 0,
-      consumerLag: 0
+      consumerLag: 0,
     };
 
     const status = await processAuthorizedEnvelope(
@@ -109,7 +114,7 @@ describe('pubsub broadcaster processing', () => {
           async connectReservedPeers() {},
           async publish() {
             throw new Error('signature format invalid');
-          }
+          },
         },
         publisher: {
           async connect() {},
@@ -119,16 +124,16 @@ describe('pubsub broadcaster processing', () => {
             if (topic === TELEMETRY_TOPICS.PUBSUB_RESULT) {
               expect(envelope.payload).toMatchObject({ status: 'failed' });
             }
-          }
+          },
         },
         idempotencyStore: {
           async has() {
             return false;
           },
-          async mark() {}
+          async mark() {},
         },
         retryStore: new InMemoryRetryCounterStore(),
-        metrics
+        metrics,
       }
     );
 
@@ -148,7 +153,7 @@ describe('pubsub broadcaster processing', () => {
       publishFailure: 0,
       retryCount: 0,
       dlqCount: 0,
-      consumerLag: 0
+      consumerLag: 0,
     };
 
     const status = await processAuthorizedEnvelope(
@@ -163,31 +168,36 @@ describe('pubsub broadcaster processing', () => {
           async stop() {},
           async connectReservedPeers() {},
           async publish() {
-            const error = new Error('network timeout') as Error & { retriable: boolean };
+            const error = new Error('network timeout') as Error & {
+              retriable: boolean;
+            };
             error.retriable = true;
             throw error;
-          }
+          },
         },
         publisher: {
           async connect() {},
           async disconnect() {},
           async publish(topic) {
             publishedTopics.push(topic);
-          }
+          },
         },
         idempotencyStore: {
           async has() {
             return false;
           },
-          async mark() {}
+          async mark() {},
         },
         retryStore: new InMemoryRetryCounterStore(),
-        metrics
+        metrics,
       }
     );
 
     expect(status).toBe('dlq');
-    expect(publishedTopics).toEqual([TELEMETRY_TOPICS.RETRY, TELEMETRY_TOPICS.DLQ]);
+    expect(publishedTopics).toEqual([
+      TELEMETRY_TOPICS.RETRY,
+      TELEMETRY_TOPICS.DLQ,
+    ]);
     expect(metrics.retryCount).toBe(1);
     expect(metrics.dlqCount).toBe(1);
     expect(commitCount).toBe(1);
@@ -204,7 +214,7 @@ describe('pubsub broadcaster processing', () => {
       publishFailure: 0,
       retryCount: 0,
       dlqCount: 0,
-      consumerLag: 0
+      consumerLag: 0,
     };
 
     const context = {
@@ -215,12 +225,12 @@ describe('pubsub broadcaster processing', () => {
         async connectReservedPeers() {},
         async publish() {
           publishCount += 1;
-        }
+        },
       },
       publisher: {
         async connect() {},
         async disconnect() {},
-        async publish() {}
+        async publish() {},
       },
       idempotencyStore: {
         async has(eventId: string) {
@@ -228,18 +238,26 @@ describe('pubsub broadcaster processing', () => {
         },
         async mark(eventId: string) {
           processedEventIds.add(eventId);
-        }
+        },
       },
       retryStore: new InMemoryRetryCounterStore(),
-      metrics
+      metrics,
     };
 
-    await processAuthorizedEnvelope(makeEnvelope('evt-dup'), async () => {
-      commitCount += 1;
-    }, context);
-    const secondStatus = await processAuthorizedEnvelope(makeEnvelope('evt-dup'), async () => {
-      commitCount += 1;
-    }, context);
+    await processAuthorizedEnvelope(
+      makeEnvelope('evt-dup'),
+      async () => {
+        commitCount += 1;
+      },
+      context
+    );
+    const secondStatus = await processAuthorizedEnvelope(
+      makeEnvelope('evt-dup'),
+      async () => {
+        commitCount += 1;
+      },
+      context
+    );
 
     expect(secondStatus).toBe('duplicate');
     expect(publishCount).toBe(1);

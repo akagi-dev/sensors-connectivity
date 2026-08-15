@@ -1,6 +1,9 @@
 import { TELEMETRY_TOPICS } from '@scp/contracts';
 import { describe, expect, it } from 'vitest';
-import { createHeartbeatTrackerState, handleTelemetryMessage } from '../src/index.js';
+import {
+  createHeartbeatTrackerState,
+  handleTelemetryMessage,
+} from '../src/index.js';
 
 function createClock(start = Date.parse('2026-01-01T00:00:00Z')) {
   let current = start;
@@ -11,7 +14,7 @@ function createClock(start = Date.parse('2026-01-01T00:00:00Z')) {
     },
     advance: (ms: number) => {
       current += ms;
-    }
+    },
   };
 }
 
@@ -26,10 +29,12 @@ function authorizedEnvelope(sensorId: string) {
     payload: {
       sensor_id: sensorBytes.toString('base64'),
       timestamp: Date.parse('2026-01-01T00:00:00Z'),
-      nonce: Buffer.from(`nonce-${sensorId}`.padEnd(16, '_').slice(0, 16)).toString('base64'),
+      nonce: Buffer.from(
+        `nonce-${sensorId}`.padEnd(16, '_').slice(0, 16)
+      ).toString('base64'),
       message: Buffer.from(JSON.stringify({ temp: 21 })).toString('base64'),
-      signature: Buffer.alloc(64, 3).toString('base64')
-    }
+      signature: Buffer.alloc(64, 3).toString('base64'),
+    },
   });
 }
 
@@ -83,10 +88,20 @@ class FakeRedis {
 describe('heartbeat tracker state', () => {
   it('counts a sensor online right after an authorized message', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
-    await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-1'),
+      tracker,
+      consumed
+    );
 
     const metrics = await tracker.createMetrics(consumed.value);
     expect(metrics.sensors_online).toBe(1);
@@ -96,10 +111,20 @@ describe('heartbeat tracker state', () => {
 
   it('drops sensor from online count once time passes the window', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
-    await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-1'),
+      tracker,
+      consumed
+    );
     clock.advance(30001);
 
     const metrics = await tracker.createMetrics(consumed.value);
@@ -110,41 +135,79 @@ describe('heartbeat tracker state', () => {
   it('recomputes online count correctly across multiple sensors', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
-    await handleTelemetryMessage(authorizedEnvelope('sensor-a'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-a'),
+      tracker,
+      consumed
+    );
     clock.set(base + 10000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-b'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-b'),
+      tracker,
+      consumed
+    );
     clock.set(base + 39000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-c'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-c'),
+      tracker,
+      consumed
+    );
 
     const metrics = await tracker.createMetrics(consumed.value);
     expect(metrics.sensors_total_tracked).toBe(3);
     expect(metrics.sensors_online).toBe(2);
     expect(metrics.sensor_uptime_seconds).toMatchObject({
       [encodeSensorId('sensor-b')]: 29,
-      [encodeSensorId('sensor-c')]: 0
+      [encodeSensorId('sensor-c')]: 0,
     });
-    expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-a')]).toBeUndefined();
+    expect(
+      metrics.sensor_uptime_seconds[encodeSensorId('sensor-a')]
+    ).toBeUndefined();
   });
 
   it('keeps onlineSince stable within window and resets after large gap', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
-    await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-1'),
+      tracker,
+      consumed
+    );
     clock.advance(10000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-1'),
+      tracker,
+      consumed
+    );
     clock.advance(5000);
 
     let metrics = await tracker.createMetrics(consumed.value);
     expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-1')]).toBe(15);
 
     clock.advance(35000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-1'),
+      tracker,
+      consumed
+    );
 
     metrics = await tracker.createMetrics(consumed.value);
     expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-1')]).toBe(0);
@@ -153,12 +216,26 @@ describe('heartbeat tracker state', () => {
   it('computes uptime aggregates and returns avg 0 when none are online', async () => {
     const base = Date.parse('2026-01-01T00:00:00Z');
     const clock = createClock(base);
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
-    await handleTelemetryMessage(authorizedEnvelope('sensor-a'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-a'),
+      tracker,
+      consumed
+    );
     clock.set(base + 10000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-b'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-b'),
+      tracker,
+      consumed
+    );
     clock.set(base + 25000);
 
     let metrics = await tracker.createMetrics(consumed.value);
@@ -174,11 +251,21 @@ describe('heartbeat tracker state', () => {
 
   it('ignores invalid and non-authorized envelopes', async () => {
     const clock = createClock();
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', 30000, 300000, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      30000,
+      300000,
+      clock.now
+    );
     const consumed = { value: 0 };
 
     await handleTelemetryMessage('not-json', tracker, consumed);
-    await handleTelemetryMessage(JSON.stringify({ event_type: TELEMETRY_TOPICS.AUTHORIZED }), tracker, consumed);
+    await handleTelemetryMessage(
+      JSON.stringify({ event_type: TELEMETRY_TOPICS.AUTHORIZED }),
+      tracker,
+      consumed
+    );
     await handleTelemetryMessage(
       JSON.stringify({
         event_id: 'evt-rejected',
@@ -187,8 +274,8 @@ describe('heartbeat tracker state', () => {
         occurred_at: '2026-01-01T00:00:00Z',
         source: 'endpoint',
         payload: {
-          reason_code: 'forbidden'
-        }
+          reason_code: 'forbidden',
+        },
       }),
       tracker,
       consumed
@@ -205,13 +292,27 @@ describe('heartbeat tracker state', () => {
     const clock = createClock(base);
     const onlineWindowMs = 30000;
     const retentionWindowMs = 300000; // 5 minutes
-    const tracker = createHeartbeatTrackerState(new FakeRedis(), 'heartbeat-tracker:test', onlineWindowMs, retentionWindowMs, clock.now);
+    const tracker = createHeartbeatTrackerState(
+      new FakeRedis(),
+      'heartbeat-tracker:test',
+      onlineWindowMs,
+      retentionWindowMs,
+      clock.now
+    );
     const consumed = { value: 0 };
 
     // Add two sensors
-    await handleTelemetryMessage(authorizedEnvelope('sensor-old'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-old'),
+      tracker,
+      consumed
+    );
     clock.set(base + 10000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-recent'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-recent'),
+      tracker,
+      consumed
+    );
 
     // Verify both are tracked
     let metrics = await tracker.createMetrics(consumed.value);
@@ -220,13 +321,19 @@ describe('heartbeat tracker state', () => {
 
     // Move time beyond retention window for sensor-old, but keep sensor-recent within retention
     clock.set(base + retentionWindowMs + 1000);
-    await handleTelemetryMessage(authorizedEnvelope('sensor-recent'), tracker, consumed);
+    await handleTelemetryMessage(
+      authorizedEnvelope('sensor-recent'),
+      tracker,
+      consumed
+    );
 
     // Check metrics - sensor-old should be pruned
     metrics = await tracker.createMetrics(consumed.value);
     expect(metrics.sensors_total_tracked).toBe(1);
     expect(metrics.sensors_online).toBe(1);
     expect(metrics.sensors_uptime.length).toBe(1);
-    expect(metrics.sensors_uptime.at(0)?.sensor_id).toBe(encodeSensorId('sensor-recent'));
+    expect(metrics.sensors_uptime.at(0)?.sensor_id).toBe(
+      encodeSensorId('sensor-recent')
+    );
   });
 });

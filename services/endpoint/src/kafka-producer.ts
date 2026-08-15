@@ -1,14 +1,20 @@
 import {
   TELEMETRY_TOPICS,
   type TelemetryAuthorizedPayload,
-  type TelemetryRejectedPayload
+  type TelemetryRejectedPayload,
 } from '@scp/contracts';
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 
 export interface EndpointEventProducer {
-  publishAuthorized(payload: TelemetryAuthorizedPayload, traceId?: string): Promise<string>;
-  publishRejected(payload: TelemetryRejectedPayload, traceId?: string): Promise<string>;
+  publishAuthorized(
+    payload: TelemetryAuthorizedPayload,
+    traceId?: string
+  ): Promise<string>;
+  publishRejected(
+    payload: TelemetryRejectedPayload,
+    traceId?: string
+  ): Promise<string>;
 }
 
 export function createEndpointEventProducer(
@@ -70,10 +76,10 @@ export function createEndpointEventProducer(
                 occurred_at: new Date().toISOString(),
                 trace_id: traceId,
                 source,
-                payload
-              })
-            }
-          ]
+                payload,
+              }),
+            },
+          ],
         });
         return eventId;
       } catch (error) {
@@ -102,12 +108,15 @@ export function createEndpointEventProducer(
               payload: {
                 failed_topic: topic,
                 reason_code: 'publish_failed',
-                reason_message: lastError instanceof Error ? lastError.message : 'Kafka publish failed',
-                failed_payload: payload
-              }
-            })
-          }
-        ]
+                reason_message:
+                  lastError instanceof Error
+                    ? lastError.message
+                    : 'Kafka publish failed',
+                failed_payload: payload,
+              },
+            }),
+          },
+        ],
       });
     } catch {
       // Best effort DLQ publish; main error is re-thrown below.
@@ -117,7 +126,10 @@ export function createEndpointEventProducer(
   }
 
   return {
-    async publishAuthorized(payload: TelemetryAuthorizedPayload, traceId?: string): Promise<string> {
+    async publishAuthorized(
+      payload: TelemetryAuthorizedPayload,
+      traceId?: string
+    ): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.AUTHORIZED,
         `${payload.sensor_id}:${payload.nonce}`,
@@ -125,13 +137,16 @@ export function createEndpointEventProducer(
         traceId
       );
     },
-    async publishRejected(payload: TelemetryRejectedPayload, traceId?: string): Promise<string> {
+    async publishRejected(
+      payload: TelemetryRejectedPayload,
+      traceId?: string
+    ): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.REJECTED,
         `${payload.sensor_id ?? 'unknown'}:${payload.reason_code}`,
         payload,
         traceId
       );
-    }
+    },
   };
 }
