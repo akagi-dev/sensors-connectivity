@@ -1,24 +1,27 @@
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { encodeAddress } from '@polkadot/util-crypto';
-import { SignedEnvelopeSchema, type SignedEnvelope } from './proto/crypto/v1/envelope_pb.js';
+
+export interface SignedEnvelope {
+  sensorId: Uint8Array;
+  timestamp: bigint;
+  nonce: Uint8Array;
+  message: Uint8Array;
+  signature: Uint8Array;
+}
 
 export const SENSOR_ID_LENGTH = 32;
 export const SIGNATURE_LENGTH = 64;
 export const MIN_NONCE_LENGTH = 16;
 export const MAX_NONCE_LENGTH = 32;
 
-export function decodeBase64OrHex(input: string): Uint8Array {
+const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+export function decodeBase64(input: string): Uint8Array {
   const normalized = input.trim();
   if (normalized.length === 0) {
     throw new Error('Expected non-empty binary string');
   }
-  const isHex = normalized.startsWith('0x') || /^[0-9a-fA-F]+$/.test(normalized);
-  if (isHex) {
-    const hex = normalized.startsWith('0x') ? normalized.slice(2) : normalized;
-    if (hex.length % 2 !== 0) {
-      throw new Error('Expected even-length hex string');
-    }
-    return Uint8Array.from(Buffer.from(hex, 'hex'));
+  if (!base64Pattern.test(normalized)) {
+    throw new Error('Expected base64-encoded bytes');
   }
   return Uint8Array.from(Buffer.from(normalized, 'base64'));
 }
@@ -53,8 +56,104 @@ export function buildEnvelopeSigningBytes(envelope: Pick<SignedEnvelope, 'sensor
   ]);
 }
 
+function encodeVarint(value: bigint): Uint8Array {
+  if (value < 0n) {
+    throw new Error('Expected non-negative varint value');
+  }
+  const chunks: number[] = [];
+  let remaining = value;
+  while (remaining >= 0x80n) {
+    chunks.push(Number((remaining & 0x7fn) | 0x80n));
+    remaining >>= 7n;
+  }
+  chunks.push(Number(remaining));
+  return Uint8Array.from(chunks);
+}
+
+function decodeVarint(bytes: Uint8Array, start: number): { value: bigint; nextOffset: number } {
+  let value = 0n;
+  let shift = 0n;
+  let offset = start;
+  while (offset < bytes.length) {
+    const current = bytes[offset];
+    if (current === undefined) {
+      break;
+    }
+    value |= BigInt(current & 0x7f) << shift;
+    offset += 1;
+    if ((current & 0x80) === 0) {
+      return { value, nextOffset: offset };
+    }
+    shift += 7n;
+    if (shift >= 64n) {
+      throw new Error('Varint exceeds uint64 range');
+    }
+  }
+  throw new Error('Invalid varint encoding');
+}
+
+function encodeLengthDelimited(bytes: Uint8Array): Uint8Array {
+  return concatBytes([encodeVarint(BigInt(bytes.length)), bytes]);
+}
+
+function readLengthDelimited(bytes: Uint8Array, start: number): { value: Uint8Array; nextOffset: number } {
+  const { value: length, nextOffset } = decodeVarint(bytes, start);
+  const size = Number(length);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error('Invalid length-delimited field size');
+  }
+  const end = nextOffset + size;
+  if (end > bytes.length) {
+    throw new Error('Truncated length-delimited field');
+  }
+  return { value: bytes.subarray(nextOffset, end), nextOffset: end };
+}
+
+function decodeSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
+  const envelope: SignedEnvelope = {
+    sensorId: new Uint8Array(),
+    timestamp: 0n,
+    nonce: new Uint8Array(),
+    message: new Uint8Array(),
+    signature: new Uint8Array()
+  };
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { value: tag, nextOffset: tagOffset } = decodeVarint(bytes, offset);
+    offset = tagOffset;
+    const fieldNumber = Number(tag >> 3n);
+    const wireType = Number(tag & 0x07n);
+    if (wireType === 2) {
+      const field = readLengthDelimited(bytes, offset);
+      offset = field.nextOffset;
+      if (fieldNumber === 1) {
+        envelope.sensorId = Uint8Array.from(field.value);
+      } else if (fieldNumber === 3) {
+        envelope.nonce = Uint8Array.from(field.value);
+      } else if (fieldNumber === 4) {
+        envelope.message = Uint8Array.from(field.value);
+      } else if (fieldNumber === 5) {
+        envelope.signature = Uint8Array.from(field.value);
+      }
+      continue;
+    }
+    if (fieldNumber === 2 && wireType === 0) {
+      const field = decodeVarint(bytes, offset);
+      envelope.timestamp = field.value;
+      offset = field.nextOffset;
+      continue;
+    }
+    if (wireType === 0) {
+      offset = decodeVarint(bytes, offset).nextOffset;
+      continue;
+    }
+    throw new Error(`Unsupported protobuf wire type: ${wireType}`);
+  }
+  return envelope;
+}
+
 export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
-  const envelope = fromBinary(SignedEnvelopeSchema, bytes);
+  const envelope = decodeSignedEnvelope(bytes);
   if (envelope.sensorId.length !== SENSOR_ID_LENGTH) {
     throw new Error(`sensor_id must be ${SENSOR_ID_LENGTH} bytes`);
   }
@@ -75,7 +174,18 @@ export function extractSensorId(envelope: Pick<SignedEnvelope, 'sensorId'>): str
 }
 
 export function toSignedEnvelopeBytes(envelope: SignedEnvelope): Uint8Array {
-  return toBinary(SignedEnvelopeSchema, envelope);
+  return concatBytes([
+    Uint8Array.from([0x0a]),
+    encodeLengthDelimited(envelope.sensorId),
+    Uint8Array.from([0x10]),
+    encodeVarint(envelope.timestamp),
+    Uint8Array.from([0x1a]),
+    encodeLengthDelimited(envelope.nonce),
+    Uint8Array.from([0x22]),
+    encodeLengthDelimited(envelope.message),
+    Uint8Array.from([0x2a]),
+    encodeLengthDelimited(envelope.signature)
+  ]);
 }
 
 export function createSignedEnvelope(input: {
@@ -85,5 +195,11 @@ export function createSignedEnvelope(input: {
   message?: Uint8Array;
   signature?: Uint8Array;
 }): SignedEnvelope {
-  return create(SignedEnvelopeSchema, input);
+  return {
+    sensorId: input.sensorId ?? new Uint8Array(),
+    timestamp: input.timestamp ?? 0n,
+    nonce: input.nonce ?? new Uint8Array(),
+    message: input.message ?? new Uint8Array(),
+    signature: input.signature ?? new Uint8Array()
+  };
 }

@@ -41,9 +41,6 @@ importers:
 
   packages/contracts:
     dependencies:
-      '@bufbuild/protobuf':
-        specifier: ^2.9.0
-        version: 2.14.0
       '@polkadot/util-crypto':
         specifier: ^13.5.9
         version: 13.5.9(@polkadot/util@13.5.9)
@@ -51,12 +48,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
-      '@bufbuild/protoc-gen-es':
-        specifier: ^2.9.0
-        version: 2.14.0(@bufbuild/protobuf@2.14.0)
       tsup:
         specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.25)(tsx@4.23.1)(typescript@5.4.5)
+        version: 8.5.1(postcss@8.5.25)(tsx@4.23.1)(typescript@5.9.3)
 
   services/authorizer:
     dependencies:
@@ -210,9 +204,6 @@ importers:
 
   tools/fake-sensor-cli:
     dependencies:
-      '@bufbuild/protobuf':
-        specifier: ^2.9.0
-        version: 2.14.0
       '@polkadot/util-crypto':
         specifier: ^13.5.9
         version: 13.5.9(@polkadot/util@13.5.9)
@@ -275,22 +266,6 @@ packages:
     resolution: {integrity: sha512-BwBKTX/WXkhAhqWJGrEKnqU03/4tK1O0OozSlwUMBCOEo8pLL3xu3M24RT3+umExEeM0wjlANO6axqGWMqtt4Q==}
     engines: {node: '>=12'}
     hasBin: true
-
-  '@bufbuild/protobuf@2.14.0':
-    resolution: {integrity: sha512-C3UGsiCwSprE2NKIIFA3hCDlpXTMCAXRZuEVp88L1GY36Y41+rYL5fryE+nOFhp4p4JPQvdV8PQ4DWgHgeTE+w==}
-
-  '@bufbuild/protoc-gen-es@2.14.0':
-    resolution: {integrity: sha512-/Rrui0BJWSRONiKGYzqWq9ivGN3+cYkmc47QWITufr7K6yDb8HfssuJUSQZeptyg/rHbHrfDzCUjzoJ2pwuafg==}
-    engines: {node: '>=22'}
-    hasBin: true
-    peerDependencies:
-      '@bufbuild/protobuf': 2.14.0
-    peerDependenciesMeta:
-      '@bufbuild/protobuf':
-        optional: true
-
-  '@bufbuild/protoplugin@2.14.0':
-    resolution: {integrity: sha512-S0TvZhVtTEkZQRj2JsXBCXiib/b0+bLQtJCcn+hj9O/usgbcgxHn4D+ii22Ao3qj0/kKxVYeo7BtAI2dMk+iig==}
 
   '@chainsafe/is-ip@2.1.0':
     resolution: {integrity: sha512-KIjt+6IfysQ4GCv66xihEitBjvhU/bixbbbFxdJ1sqCp4uJ0wuZiYBPhksZoy4lfaF0k9cwNzY5upEW/VWdw3w==}
@@ -1358,11 +1333,6 @@ packages:
   '@typescript-eslint/visitor-keys@8.65.0':
     resolution: {integrity: sha512-8C71BQkGjiMmXtop7pHVJu1l2NNShFdkCyD6a2ezzs5vU/L3LRtb69EtcteFwz0mYMPzIgOw0n6OV4VBUWZd7A==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@typescript/vfs@1.6.4':
-    resolution: {integrity: sha512-PJFXFS4ZJKiJ9Qiuix6Dz/OwEIqHD7Dme1UwZhTK11vR+5dqW2ACbdndWQexBzCx+CPuMe5WBYQWCsFyGlQLlQ==}
-    peerDependencies:
-      typescript: '*'
 
   '@ungap/structured-clone@1.3.3':
     resolution: {integrity: sha512-60YRaenCQcVjYEKOcG824+DRGGIQ3VKErcBoAEDJZz5bKIs2ZG+X/H9Nk+Q6EVkwJk5QNApxbrc5QtBSwtrXAg==}
@@ -2591,11 +2561,6 @@ packages:
     resolution: {integrity: sha512-Ne+eE4r0/iWnpAxD852z3A+N0Bt5RN//NjJwRd2VFHEmrywxf5vsZlh4R6lixl6B+wz/8d+maTSAkN1FIkI3LQ==}
     engines: {node: '>=10'}
 
-  typescript@5.4.5:
-    resolution: {integrity: sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==}
-    engines: {node: '>=14.17'}
-    hasBin: true
-
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -2785,24 +2750,6 @@ snapshots:
       '@bufbuild/buf-linux-x64': 1.72.0
       '@bufbuild/buf-win32-arm64': 1.72.0
       '@bufbuild/buf-win32-x64': 1.72.0
-
-  '@bufbuild/protobuf@2.14.0': {}
-
-  '@bufbuild/protoc-gen-es@2.14.0(@bufbuild/protobuf@2.14.0)':
-    dependencies:
-      '@bufbuild/protoplugin': 2.14.0
-    optionalDependencies:
-      '@bufbuild/protobuf': 2.14.0
-    transitivePeerDependencies:
-      - supports-color
-
-  '@bufbuild/protoplugin@2.14.0':
-    dependencies:
-      '@bufbuild/protobuf': 2.14.0
-      '@typescript/vfs': 1.6.4(typescript@5.4.5)
-      typescript: 5.4.5
-    transitivePeerDependencies:
-      - supports-color
 
   '@chainsafe/is-ip@2.1.0': {}
 
@@ -3974,13 +3921,6 @@ snapshots:
     dependencies:
       '@typescript-eslint/types': 8.65.0
       eslint-visitor-keys: 5.0.1
-
-  '@typescript/vfs@1.6.4(typescript@5.4.5)':
-    dependencies:
-      debug: 4.4.3
-      typescript: 5.4.5
-    transitivePeerDependencies:
-      - supports-color
 
   '@ungap/structured-clone@1.3.3': {}
 
@@ -5296,34 +5236,6 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsup@8.5.1(postcss@8.5.25)(tsx@4.23.1)(typescript@5.4.5):
-    dependencies:
-      bundle-require: 5.1.0(esbuild@0.27.7)
-      cac: 6.7.14
-      chokidar: 4.0.3
-      consola: 3.4.2
-      debug: 4.4.3
-      esbuild: 0.27.7
-      fix-dts-default-cjs-exports: 1.0.1
-      joycon: 3.1.1
-      picocolors: 1.1.1
-      postcss-load-config: 6.0.1(postcss@8.5.25)(tsx@4.23.1)
-      resolve-from: 5.0.0
-      rollup: 4.62.3
-      source-map: 0.7.6
-      sucrase: 3.35.1
-      tinyexec: 0.3.2
-      tinyglobby: 0.2.17
-      tree-kill: 1.2.2
-    optionalDependencies:
-      postcss: 8.5.25
-      typescript: 5.4.5
-    transitivePeerDependencies:
-      - jiti
-      - supports-color
-      - tsx
-      - yaml
-
   tsup@8.5.1(postcss@8.5.25)(tsx@4.23.1)(typescript@5.9.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
@@ -5372,8 +5284,6 @@ snapshots:
       prelude-ls: 1.2.1
 
   type-fest@0.20.2: {}
-
-  typescript@5.4.5: {}
 
   typescript@5.9.3: {}
 

@@ -3,7 +3,6 @@
 ## `POST /v1/telemetry`
 
 - Primary transport: `Content-Type: application/protobuf`
-- Compatibility transport: `application/json` with `{ "envelope": "<base64 protobuf SignedEnvelope>" }`
 
 ## Wire format
 
@@ -33,14 +32,17 @@ message Message {
 
 ## Signature (normative)
 
-No JSON canonicalization is used.
-
 ```text
 timestamp_le = uint64(timestamp) encoded as 8 bytes little-endian
 signing_bytes = sensor_id || timestamp_le || nonce || message
 signature = Ed25519.sign(private_key, signing_bytes)
 verify    = Ed25519.verify(public_key, signing_bytes, signature)
 ```
+
+## Routing and zones
+
+- `X-Request-Id` is passed through for tracing/auditing.
+- `X-Sensor-Zone` remains available for upstream routing policies (`ru`, `eu-west`, `us-east`, `ap-southeast`).
 
 Connectivity validates signature and envelope constraints; it does not decode inner measurements.
 

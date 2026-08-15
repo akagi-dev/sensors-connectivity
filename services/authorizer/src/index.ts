@@ -3,10 +3,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
-import { z } from 'zod';
 import type { TelemetryRejectedPayload, SignedEnvelope } from '@scp/contracts';
 import {
-  decodeBase64OrHex,
   encodeBase64,
   extractSensorId,
   validateSignedEnvelope
@@ -15,13 +13,6 @@ import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-
 import { createAuthorizerEventProducer, type AuthorizerEventProducer } from './kafka-producer.js';
 import { loadAuthorizerConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
-
-const telemetryEnvelopeWrapperSchema = z.object({
-  envelope: z.string().min(1).optional(),
-  envelope_b64: z.string().min(1).optional()
-}).refine((value) => Boolean(value.envelope ?? value.envelope_b64), {
-  message: 'Expected envelope or envelope_b64'
-});
 
 const logger = pino({
   name: 'authorizer',
@@ -68,16 +59,13 @@ function toHex(bytes: Uint8Array): string {
 
 function parseSignedEnvelope(request: FastifyRequest): { envelope: SignedEnvelope; rawBytes: Uint8Array } {
   const contentType = request.headers['content-type']?.toLowerCase() ?? '';
-  if (contentType.includes('application/protobuf') || contentType.includes('application/x-protobuf')) {
-    if (!(request.body instanceof Uint8Array || Buffer.isBuffer(request.body))) {
-      throw new Error('Expected binary protobuf request body');
-    }
-    const rawBytes = Uint8Array.from(request.body);
-    return { envelope: validateSignedEnvelope(rawBytes), rawBytes };
+  if (!contentType.includes('application/protobuf') && !contentType.includes('application/x-protobuf')) {
+    throw new Error('Expected Content-Type application/protobuf');
   }
-
-  const wrapper = telemetryEnvelopeWrapperSchema.parse(request.body);
-  const rawBytes = decodeBase64OrHex(wrapper.envelope ?? wrapper.envelope_b64 ?? '');
+  if (!(request.body instanceof Uint8Array || Buffer.isBuffer(request.body))) {
+    throw new Error('Expected binary protobuf request body');
+  }
+  const rawBytes = Uint8Array.from(request.body);
   return { envelope: validateSignedEnvelope(rawBytes), rawBytes };
 }
 

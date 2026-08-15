@@ -9,14 +9,12 @@
     "dist"
   ],
   "scripts": {
-    "proto:sync": "pnpm exec buf export buf.build/airalab/sensors-social-proto --output proto",
     "build": "tsup src/index.ts --format esm --dts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.9.0",
     "@polkadot/util-crypto": "^13.5.9",
     "zod": "^3.23.8"
   },

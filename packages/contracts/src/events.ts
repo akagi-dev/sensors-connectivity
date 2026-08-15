@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  decodeBase64OrHex,
+  decodeBase64,
   MAX_NONCE_LENGTH,
   MIN_NONCE_LENGTH,
   SENSOR_ID_LENGTH,
@@ -9,22 +9,22 @@ import {
 
 const binaryStringSchema = z.string().min(1).refine((value) => {
   try {
-    decodeBase64OrHex(value);
+    decodeBase64(value);
     return true;
   } catch {
     return false;
   }
-}, 'Expected base64 or hex-encoded bytes');
+}, 'Expected base64-encoded bytes');
 
 const fixedLengthBinaryStringSchema = (bytes: number, name: string) =>
-  binaryStringSchema.refine((value) => decodeBase64OrHex(value).length === bytes, `${name} must be ${bytes} bytes`);
+  binaryStringSchema.refine((value) => decodeBase64(value).length === bytes, `${name} must be ${bytes} bytes`);
 
 export const telemetryAuthorizedPayloadSchema = z
   .object({
     sensor_id: fixedLengthBinaryStringSchema(SENSOR_ID_LENGTH, 'sensor_id'),
     timestamp: z.number().int().nonnegative(),
     nonce: binaryStringSchema.refine((value) => {
-      const bytes = decodeBase64OrHex(value);
+      const bytes = decodeBase64(value);
       return bytes.length >= MIN_NONCE_LENGTH && bytes.length <= MAX_NONCE_LENGTH;
     }, `nonce must be ${MIN_NONCE_LENGTH}-${MAX_NONCE_LENGTH} bytes`),
     message: binaryStringSchema,

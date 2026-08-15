@@ -99,12 +99,7 @@ The CLI now sends binary protobuf `crypto.v1.SignedEnvelope` (`Content-Type: app
 ## Protocol assets
 
 - Buf module: `buf.build/airalab/sensors-social-proto`
-- Contracts helper exposes generated protobuf bindings under `packages/contracts/src/proto/`
-- Sync local proto source snapshot from Buf when available:
-
-```bash
-pnpm --filter @scp/contracts proto:sync
-```
+- Generated SDK package: `@buf/airalab_sensors-social-proto.bufbuild_es`
 
 ## Service overview
 

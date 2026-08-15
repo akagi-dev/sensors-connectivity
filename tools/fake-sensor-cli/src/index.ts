@@ -1,14 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { create, toBinary } from '@bufbuild/protobuf';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
 import {
-  BME280Schema,
-  HumiditySchema,
-  MessageSchema,
-  TemperatureSchema,
-  UrbanSensorSchema,
-  UrbanSchema,
   buildEnvelopeSigningBytes,
   createSignedEnvelope,
   toSignedEnvelopeBytes
@@ -172,42 +165,21 @@ export function createFakeEnvelopePayload(signerSeedHex: string): FakeEnvelopePa
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
   const temperature = Number((18 + Math.random() * 8).toFixed(2));
   const humidity = Number((30 + Math.random() * 40).toFixed(2));
-  const message = create(MessageSchema, {
-    metadata: {
-      owner: pair.publicKey
-    },
-    payload: {
-      case: 'urban',
-      value: create(UrbanSchema, {
-        public: [
-          create(UrbanSensorSchema, {
-            sensor: {
-              case: 'bme280',
-              value: create(BME280Schema, {
-                measurement: {
-                  case: 'temperature',
-                  value: create(TemperatureSchema, { celsius: temperature })
-                }
-              })
-            }
-          }),
-          create(UrbanSensorSchema, {
-            sensor: {
-              case: 'bme280',
-              value: create(BME280Schema, {
-                measurement: {
-                  case: 'humidity',
-                  value: create(HumiditySchema, { percent: humidity })
-                }
-              })
-            }
-          })
-        ]
+  const messageBytes = Uint8Array.from(
+    Buffer.from(
+      JSON.stringify({
+        owner: Buffer.from(pair.publicKey).toString('base64'),
+        payload: {
+          urban: {
+            public: [
+              { sensor: { bme280: { measurement: { temperature: { celsius: temperature } } } } },
+              { sensor: { bme280: { measurement: { humidity: { percent: humidity } } } } }
+            ]
+          }
+        }
       })
-    }
-  });
-
-  const messageBytes = toBinary(MessageSchema, message);
+    )
+  );
   const timestamp = BigInt(Date.now());
   const nonce = randomBytes(16);
   const envelope = createSignedEnvelope({
