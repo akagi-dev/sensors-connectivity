@@ -6,18 +6,18 @@ import {
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 
-export interface AuthorizerEventProducer {
+export interface EndpointEventProducer {
   publishAuthorized(payload: TelemetryAuthorizedPayload, traceId?: string): Promise<string>;
   publishRejected(payload: TelemetryRejectedPayload, traceId?: string): Promise<string>;
 }
 
-export function createAuthorizerEventProducer(
+export function createEndpointEventProducer(
   brokers: string[],
-  source = 'authorizer',
+  source = 'endpoint',
   maxAttempts = 3,
   retryBackoffMs = 100
-): AuthorizerEventProducer {
-  const kafka = new Kafka({ clientId: 'authorizer', brokers });
+): EndpointEventProducer {
+  const kafka = new Kafka({ clientId: 'endpoint', brokers });
   const producer = kafka.producer();
   let connected = false;
   let connectPromise: Promise<void> | undefined;

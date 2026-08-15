@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createAuthorizerApp } from '../src/index.js';
+import { createEndpointApp } from '../src/index.js';
 import { InMemoryRegistryReader } from '../../registry-sync/src/reader.js';
 
-describe('authorizer smoke', () => {
+describe('endpoint smoke', () => {
   it('returns 403 for unknown sensor, emits rejected event, and exposes health/metrics counters', async () => {
     const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
-    const app = createAuthorizerApp({
+    const app = createEndpointApp({
       registryReader: new InMemoryRegistryReader([]),
       producer: {
         async publishAuthorized() {
@@ -54,7 +54,7 @@ describe('authorizer smoke', () => {
 
   it('returns 401 for stale timestamps before registry/signature checks', async () => {
     const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
-    const app = createAuthorizerApp(
+    const app = createEndpointApp(
       {
         registryReader: new InMemoryRegistryReader([]),
         producer: {

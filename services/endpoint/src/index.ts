@@ -6,8 +6,8 @@ import pino from 'pino';
 import { z } from 'zod';
 import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-sync';
 import type { TelemetryRejectedPayload } from '@scp/contracts';
-import { createAuthorizerEventProducer, type AuthorizerEventProducer } from './kafka-producer.js';
-import { loadAuthorizerConfig } from './config.js';
+import { createEndpointEventProducer, type EndpointEventProducer } from './kafka-producer.js';
+import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
 
 const telemetryRequestSchema = z
@@ -34,8 +34,8 @@ const telemetryRequestJsonSchema = {
 } as const;
 
 const logger = pino({
-  name: 'authorizer',
-  level: process.env.AUTHORIZER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  name: 'endpoint',
+  level: process.env.ENDPOINT_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
 });
 
 export function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -63,18 +63,18 @@ export function logError(message: string, error: unknown, context?: Record<strin
   );
 }
 
-export interface AuthorizerDeps {
+export interface EndpointDeps {
   registryReader: RegistryReader;
-  producer: AuthorizerEventProducer;
+  producer: EndpointEventProducer;
 }
 
-export interface AuthorizerAppOptions {
+export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
 }
 
-export function createAuthorizerApp(
-  deps: AuthorizerDeps,
-  options: AuthorizerAppOptions = {}
+export function createEndpointApp(
+  deps: EndpointDeps,
+  options: EndpointAppOptions = {}
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const timestampSkewSeconds = options.timestampSkewSeconds ?? 300;
@@ -308,9 +308,9 @@ export function createAuthorizerApp(
   return app;
 }
 
-export async function startAuthorizer() {
-  const config = loadAuthorizerConfig();
-  logInfo('starting authorizer service', {
+export async function startEndpoint() {
+  const config = loadEndpointConfig();
+  logInfo('starting endpoint service', {
     port: config.port,
     source: config.source,
     kafka_broker_count: config.kafkaBrokers.length,
@@ -318,9 +318,9 @@ export async function startAuthorizer() {
     producer_max_attempts: config.producerMaxAttempts,
     producer_retry_backoff_ms: config.producerRetryBackoffMs
   });
-  const app = createAuthorizerApp({
+  const app = createEndpointApp({
     registryReader: createRegistryReaderFromEnv(),
-    producer: createAuthorizerEventProducer(
+    producer: createEndpointEventProducer(
       config.kafkaBrokers,
       config.source,
       config.producerMaxAttempts,
@@ -337,7 +337,7 @@ export async function startAuthorizer() {
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
-  startAuthorizer().catch((error: unknown) => {
+  startEndpoint().catch((error: unknown) => {
     logError('failed to start', error);
     process.exitCode = 1;
   });
