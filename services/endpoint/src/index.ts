@@ -1,38 +1,28 @@
 import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fileURLToPath } from 'node:url';
-import { z } from 'zod';
-import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-sync';
-import type { TelemetryRejectedPayload } from '@scp/contracts';
-import { createEndpointEventProducer, type EndpointEventProducer } from './kafka-producer.js';
+import type { TelemetryRejectedPayload, SignedEnvelope } from '@scp/contracts';
+import {
+  encodeBase64,
+  extractSensorId,
+  validateSignedEnvelope,
+} from '@scp/contracts';
+import {
+  createRegistryReaderFromEnv,
+  type RegistryReader,
+} from '@scp/registry-sync';
+import {
+  createEndpointEventProducer,
+  type EndpointEventProducer,
+} from './kafka-producer.js';
 import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
-import { createSensorAuthProvider, loadSensorAuthConfig } from './sensor-auth-factory.js';
-import { logDebug, logError, logInfo, logWarn } from './logger.js';
-
-const telemetryRequestSchema = z
-  .object({
-    measurements: z.record(z.unknown()),
-    sensor_id: z.string().min(1),
-    timestamp: z.string().datetime({ offset: true }),
-    nonce: z.string().min(1),
-    signature: z.string().min(1)
-  })
-  .passthrough();
-
-const telemetryRequestJsonSchema = {
-  type: 'object',
-  required: ['measurements', 'sensor_id', 'timestamp', 'nonce', 'signature'],
-  properties: {
-    measurements: { type: 'object' },
-    sensor_id: { type: 'string' },
-    timestamp: { type: 'string', format: 'date-time' },
-    nonce: { type: 'string' },
-    signature: { type: 'string' }
-  },
-  additionalProperties: true
-} as const;
+import {
+  createSensorAuthProvider,
+  loadSensorAuthConfig,
+} from './sensor-auth-factory.js';
+import { logError, logInfo, logWarn } from './logger.js';
 
 export interface EndpointDeps {
   registryReader: RegistryReader;
@@ -41,6 +31,28 @@ export interface EndpointDeps {
 
 export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
+}
+
+function parseSignedEnvelope(request: FastifyRequest): {
+  envelope: SignedEnvelope;
+  rawBytes: Uint8Array;
+} {
+  const contentType = request.headers['content-type']?.toLowerCase() ?? '';
+  if (
+    !contentType.includes('application/protobuf') &&
+    !contentType.includes('application/x-protobuf')
+  ) {
+    throw new Error('Expected Content-Type application/protobuf');
+  }
+  if (!(request.body instanceof Uint8Array || Buffer.isBuffer(request.body))) {
+    throw new Error('Expected binary protobuf request body');
+  }
+  const rawBytes = Uint8Array.from(request.body);
+  return { envelope: validateSignedEnvelope(rawBytes), rawBytes };
 }
 
 export function createEndpointApp(
@@ -52,12 +64,18 @@ export function createEndpointApp(
   const metrics = {
     accepted: 0,
     rejected: 0,
-    kafkaErrors: 0
+    kafkaErrors: 0,
   };
+
+  app.addContentTypeParser(
+    ['application/protobuf', 'application/x-protobuf'],
+    { parseAs: 'buffer' },
+    (_request, body, done) => done(null, body)
+  );
 
   app.register(rateLimit, {
     max: 100,
-    timeWindow: '1 minute'
+    timeWindow: '1 minute',
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
@@ -66,25 +84,39 @@ export function createEndpointApp(
   app.post(
     '/v1/telemetry',
     {
-      schema: {
-        body: telemetryRequestJsonSchema
-      },
       config: {
         rateLimit: {
           max: 100,
-          timeWindow: '1 minute'
-        }
-      }
+          timeWindow: '1 minute',
+        },
+      },
     },
     async (request, reply) => {
-      const body = telemetryRequestSchema.parse(request.body);
       const traceId = request.headers['x-request-id']?.toString() ?? request.id;
-      logInfo('telemetry request received', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        timestamp: body.timestamp,
-        nonce: body.nonce
-      });
+      let parsedEnvelope: SignedEnvelope;
+      let rawEnvelopeBytes: Uint8Array;
+      let sensorAddress: string;
+      let nonceHex: string;
+      let sensorHex: string;
+
+      try {
+        const parsed = parseSignedEnvelope(request);
+        parsedEnvelope = parsed.envelope;
+        rawEnvelopeBytes = parsed.rawBytes;
+        sensorAddress = extractSensorId(parsedEnvelope);
+        nonceHex = toHex(parsedEnvelope.nonce);
+        sensorHex = toHex(parsedEnvelope.sensorId);
+      } catch (error) {
+        metrics.rejected += 1;
+        logWarn('telemetry rejected due to invalid envelope', {
+          trace_id: traceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return reply
+          .code(400)
+          .send({ status: 'rejected', error_code: 'invalid_envelope' });
+      }
+
       const publishRejectedEvent = (payload: TelemetryRejectedPayload) =>
         void deps.producer
           .publishRejected(payload, traceId)
@@ -93,185 +125,122 @@ export function createEndpointApp(
               event_id: eventId,
               trace_id: traceId,
               sensor_id: payload.sensor_id,
-              reason_code: payload.reason_code
+              reason_code: payload.reason_code,
             });
           })
           .catch((error) => {
             logError('failed to publish rejected event', error, {
               trace_id: traceId,
               sensor_id: payload.sensor_id,
-              reason_code: payload.reason_code
+              reason_code: payload.reason_code,
             });
           });
 
-      logDebug('validating telemetry timestamp', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id
-      });
-      const timestampMs = Date.parse(body.timestamp);
+      const timestampMs = Number(parsedEnvelope.timestamp);
       const skewMs = Math.abs(Date.now() - timestampMs);
-      if (Number.isNaN(timestampMs) || skewMs > timestampSkewSeconds * 1000) {
+      if (
+        !Number.isSafeInteger(timestampMs) ||
+        skewMs > timestampSkewSeconds * 1000
+      ) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to stale timestamp', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          timestamp: body.timestamp,
-          skew_ms: Number.isNaN(timestampMs) ? undefined : skewMs,
-          allowed_skew_seconds: timestampSkewSeconds
-        });
         publishRejectedEvent({
-          sensor_id: body.sensor_id,
+          sensor_id: sensorAddress,
           reason_code: 'stale_timestamp',
-          reason_message: 'Timestamp outside allowed skew window'
+          reason_message: 'Timestamp outside allowed skew window',
         });
-        return reply.code(401).send({ status: 'rejected', error_code: 'stale_timestamp' });
+        return reply
+          .code(401)
+          .send({ status: 'rejected', error_code: 'stale_timestamp' });
       }
-      logDebug('telemetry timestamp accepted', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        skew_ms: skewMs,
-        allowed_skew_seconds: timestampSkewSeconds
-      });
 
-      logDebug('loading sensor record', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id
-      });
-      const record = await deps.registryReader.getSensorRecord(body.sensor_id);
+      const record = await deps.registryReader.getSensorRecord(sensorAddress);
       if (!record || !record.enabled) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to unknown or disabled sensor', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          sensor_record_found: Boolean(record),
-          sensor_enabled: record?.enabled
-        });
         publishRejectedEvent({
-          sensor_id: body.sensor_id,
+          sensor_id: sensorAddress,
           reason_code: 'sensor_forbidden',
-          reason_message: 'Sensor is unknown or disabled'
+          reason_message: 'Sensor is unknown or disabled',
         });
-        return reply.code(403).send({ status: 'rejected', error_code: 'sensor_forbidden' });
+        return reply
+          .code(403)
+          .send({ status: 'rejected', error_code: 'sensor_forbidden' });
       }
-      logDebug('sensor record accepted', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        sensor_enabled: record.enabled
-      });
 
-      logDebug('checking nonce replay protection', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        nonce: body.nonce
-      });
-      const nonceSeen = await deps.registryReader.isNonceSeen(body.sensor_id, body.nonce);
+      const nonceSeen = await deps.registryReader.isNonceSeen(
+        sensorHex,
+        nonceHex
+      );
       if (nonceSeen) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to duplicate nonce', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
-        });
         publishRejectedEvent({
-          sensor_id: body.sensor_id,
+          sensor_id: sensorAddress,
           reason_code: 'duplicate_nonce',
-          reason_message: 'Nonce already used for this sensor'
+          reason_message: 'Nonce already used for this sensor',
         });
-        return reply.code(409).send({ status: 'rejected', error_code: 'duplicate_nonce' });
+        return reply
+          .code(409)
+          .send({ status: 'rejected', error_code: 'duplicate_nonce' });
       }
-      logDebug('nonce accepted', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        nonce: body.nonce
-      });
 
-      logDebug('verifying telemetry signature', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        nonce: body.nonce
-      });
       const signatureValid = await verifyTelemetrySignature({
-        measurements: body.measurements,
-        timestamp: body.timestamp,
-        nonce: body.nonce,
-        sensorId: body.sensor_id,
-        signature: body.signature,
-        signerAddress: record.sensorId
+        sensorId: parsedEnvelope.sensorId,
+        timestamp: parsedEnvelope.timestamp,
+        nonce: parsedEnvelope.nonce,
+        message: parsedEnvelope.message,
+        signature: parsedEnvelope.signature,
+        signerAddress: record.sensorId,
       });
 
       if (!signatureValid) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to invalid signature', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
-        });
         publishRejectedEvent({
-          sensor_id: body.sensor_id,
+          sensor_id: sensorAddress,
           reason_code: 'invalid_signature',
-          reason_message: 'Signature verification failed'
+          reason_message: 'Signature verification failed',
         });
-        return reply.code(401).send({ status: 'rejected', error_code: 'invalid_signature' });
+        return reply
+          .code(401)
+          .send({ status: 'rejected', error_code: 'invalid_signature' });
       }
-      logDebug('signature accepted', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        nonce: body.nonce
-      });
 
       try {
-        logDebug('publishing authorized telemetry event', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
-        });
-        const eventId = await deps.producer.publishAuthorized({
-          sensor_id: body.sensor_id,
-          timestamp: body.timestamp,
-          nonce: body.nonce,
-          measurements: body.measurements,
-          signature: body.signature
-        }, traceId);
-        logInfo('authorized telemetry event published', {
-          event_id: eventId,
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
-        });
+        await deps.producer.publishAuthorized(
+          {
+            sensor_id: encodeBase64(parsedEnvelope.sensorId),
+            timestamp: timestampMs,
+            nonce: encodeBase64(parsedEnvelope.nonce),
+            message: encodeBase64(parsedEnvelope.message),
+            signature: encodeBase64(parsedEnvelope.signature),
+            envelope: encodeBase64(rawEnvelopeBytes),
+          },
+          traceId
+        );
       } catch (error) {
         metrics.kafkaErrors += 1;
         metrics.rejected += 1;
         logError('failed to publish authorized telemetry event', error, {
           trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
+          sensor_id: sensorAddress,
         });
-        return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
+        return reply
+          .code(503)
+          .send({ status: 'rejected', error_code: 'kafka_unavailable' });
       }
 
       try {
-        logDebug('remembering accepted nonce', {
-          trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
-        });
-        await deps.registryReader.rememberNonce(body.sensor_id, body.nonce);
+        await deps.registryReader.rememberNonce(sensorHex, nonceHex);
       } catch (error) {
         metrics.rejected += 1;
         logError('failed to remember sensor nonce', error, {
           trace_id: traceId,
-          sensor_id: body.sensor_id,
-          nonce: body.nonce
+          sensor_id: sensorAddress,
         });
-        return reply.code(503).send({ status: 'rejected', error_code: 'kafka_unavailable' });
+        return reply
+          .code(503)
+          .send({ status: 'rejected', error_code: 'kafka_unavailable' });
       }
 
       metrics.accepted += 1;
-      logInfo('telemetry accepted', {
-        trace_id: traceId,
-        sensor_id: body.sensor_id,
-        nonce: body.nonce
-      });
       return reply.code(202).send({ status: 'accepted' });
     }
   );
@@ -279,10 +248,10 @@ export function createEndpointApp(
   return app;
 }
 
-export async function startEndpoint() {
+export async function startEndpoint(): Promise<FastifyInstance> {
   const config = loadEndpointConfig();
   const authConfig = loadSensorAuthConfig();
-  
+
   logInfo('starting endpoint service', {
     port: config.port,
     source: config.source,
@@ -290,7 +259,7 @@ export async function startEndpoint() {
     kafka_broker_count: config.kafkaBrokers.length,
     timestamp_skew_seconds: config.timestampSkewSeconds,
     producer_max_attempts: config.producerMaxAttempts,
-    producer_retry_backoff_ms: config.producerRetryBackoffMs
+    producer_retry_backoff_ms: config.producerRetryBackoffMs,
   });
 
   const registryReader = createSensorAuthProvider(
@@ -298,17 +267,20 @@ export async function startEndpoint() {
     createRegistryReaderFromEnv
   );
 
-  const app = createEndpointApp({
-    registryReader,
-    producer: createEndpointEventProducer(
-      config.kafkaBrokers,
-      config.source,
-      config.producerMaxAttempts,
-      config.producerRetryBackoffMs
-    )
-  }, {
-    timestampSkewSeconds: config.timestampSkewSeconds
-  });
+  const app = createEndpointApp(
+    {
+      registryReader,
+      producer: createEndpointEventProducer(
+        config.kafkaBrokers,
+        config.source,
+        config.producerMaxAttempts,
+        config.producerRetryBackoffMs
+      ),
+    },
+    {
+      timestampSkewSeconds: config.timestampSkewSeconds,
+    }
+  );
 
   await app.listen({ host: '0.0.0.0', port: config.port });
   logInfo('listening', { port: config.port });

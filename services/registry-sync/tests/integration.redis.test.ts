@@ -29,7 +29,7 @@ describe.runIf(runRedisIntegration)('registry-sync redis integration', () => {
       healthPort: 3021,
       maxRetries: 3,
       retryBackoffMs: 1,
-      nonceTtlSeconds: 900
+      nonceTtlSeconds: 900,
     };
 
     const source = new FixtureEventSource([
@@ -38,22 +38,22 @@ describe.runIf(runRedisIntegration)('registry-sync redis integration', () => {
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationCreated',
-        sensorId: 'sensor-int'
+        sensorId: 'sensor-int',
       },
       {
         blockHeight: 402,
         eventIndex: 0,
         section: 'registry',
         method: 'AuthorizationDisabled',
-        sensorId: 'sensor-int'
-      }
+        sensorId: 'sensor-int',
+      },
     ]);
 
     const service = createRegistrySyncService({
       config,
       redis,
       eventSource: source,
-      enableHealthServer: false
+      enableHealthServer: false,
     });
 
     await service.start();

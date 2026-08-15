@@ -30,7 +30,9 @@ export class InMemoryRegistryReader implements RegistryReader {
     return record !== null && record.enabled;
   }
 
-  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
+  async getSensorRecord(
+    sensorId: string
+  ): Promise<SensorRegistryRecord | null> {
     return this.sensors.get(sensorId) ?? null;
   }
 
@@ -51,7 +53,10 @@ export class RedisRegistryReader implements RegistryReader {
     redisKeyPrefix: string,
     private readonly nonceTtlSeconds: number
   ) {
-    this.projectionStore = new RedisProjectionStore(redis, createRedisKeyspace(redisKeyPrefix));
+    this.projectionStore = new RedisProjectionStore(
+      redis,
+      createRedisKeyspace(redisKeyPrefix)
+    );
   }
 
   async authenticate(sensorId: string): Promise<boolean> {
@@ -59,7 +64,9 @@ export class RedisRegistryReader implements RegistryReader {
     return record !== null && record.enabled;
   }
 
-  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
+  async getSensorRecord(
+    sensorId: string
+  ): Promise<SensorRegistryRecord | null> {
     const record = await this.projectionStore.readSensor(sensorId);
     if (!record) {
       return null;
@@ -67,7 +74,7 @@ export class RedisRegistryReader implements RegistryReader {
 
     return {
       sensorId: record.sensorId,
-      enabled: record.enabled
+      enabled: record.enabled,
     };
   }
 
@@ -76,7 +83,11 @@ export class RedisRegistryReader implements RegistryReader {
   }
 
   async rememberNonce(sensorId: string, nonce: string): Promise<void> {
-    await this.projectionStore.rememberNonce(sensorId, nonce, this.nonceTtlSeconds);
+    await this.projectionStore.rememberNonce(
+      sensorId,
+      nonce,
+      this.nonceTtlSeconds
+    );
   }
 }
 
@@ -91,6 +102,10 @@ export function createRegistryReaderFromEnv(): RegistryReader {
   const config = loadRegistrySyncConfig();
   const RedisClient = Redis as unknown as RedisConstructor;
   const redis = new RedisClient(config.redisUrl);
-  sharedRedisReader = new RedisRegistryReader(redis, config.redisKeyPrefix, config.nonceTtlSeconds);
+  sharedRedisReader = new RedisRegistryReader(
+    redis,
+    config.redisKeyPrefix,
+    config.nonceTtlSeconds
+  );
   return sharedRedisReader;
 }

@@ -18,7 +18,7 @@ Implement `pubsub-broadcaster` as an idempotent Kafka consumer that relays `tele
 ## Inputs & Outputs
 ### Inputs
 - Kafka topic consumed: `telemetry.authorized.v1`.
-- Envelope/payload contract from WP-00.
+- Envelope/payload contract from WP-00 (protobuf envelope fields serialized as base64 strings).
 - External system: libp2p/GossipSub network.
 
 ### Outputs

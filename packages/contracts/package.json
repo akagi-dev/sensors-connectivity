@@ -9,15 +9,17 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
   "dependencies": {
+    "@buf/airalab_sensors-social-proto.bufbuild_es": "2.14.0-20260813110742-1c6551137e5d.1",
+    "@polkadot/util-crypto": "^13.5.9",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "tsup": "^8.5.0"
+    "tsdown": "^0.2.14"
   }
 }

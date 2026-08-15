@@ -5,19 +5,24 @@ import {
   telemetryRejectedPayloadSchema,
   telemetryPubsubResultPayloadSchema,
   telemetryIpfsPublishedPayloadSchema,
-  telemetryBlockchainResultPayloadSchema
+  telemetryBlockchainResultPayloadSchema,
 } from '../src/events.js';
 import {
   InMemoryRetryCounterStore,
-  runConsumerProcessingRule
+  runConsumerProcessingRule,
 } from '../src/consumer-runtime.js';
 import { TELEMETRY_TOPICS } from '../src/topics.js';
 import {
   parseEnvelopeWithKnownPayload,
   validateEnvelope,
   validateEnvelopeWithKnownPayload,
-  validatePayloadForEventType
+  validatePayloadForEventType,
 } from '../src/validation.js';
+import {
+  createSignedEnvelope,
+  toSignedEnvelopeBytes,
+  validateSignedEnvelope,
+} from '../src/protobuf.js';
 
 describe('contracts', () => {
   it('parses well-formed envelope + authorized payload', () => {
@@ -28,12 +33,12 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'endpoint',
       payload: {
-        sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: { temp: 21.4 },
-        signature: '0xabc'
-      }
+        sensor_id: Buffer.alloc(32, 1).toString('base64'),
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: Buffer.from('payload').toString('base64'),
+        signature: Buffer.alloc(64, 3).toString('base64'),
+      },
     });
 
     expect(result.event_type).toBe('telemetry.authorized.v1');
@@ -43,7 +48,7 @@ describe('contracts', () => {
     expect(
       telemetryRejectedPayloadSchema.parse({
         reason_code: 'unauthorized',
-        reason_message: 'bad signature'
+        reason_message: 'bad signature',
       })
     ).toBeTruthy();
 
@@ -52,14 +57,14 @@ describe('contracts', () => {
         status: 'submitted',
         pubsub_topic: 'telemetry/authorized/v1',
         sensor_id: 'sensor-1',
-        nonce: 'nonce-1'
+        nonce: 'nonce-1',
       })
     ).toBeTruthy();
 
     expect(
       telemetryIpfsPublishedPayloadSchema.parse({
         cid: 'bafybeigdyrzt',
-        event_count: 10
+        event_count: 10,
       })
     ).toBeTruthy();
 
@@ -68,7 +73,7 @@ describe('contracts', () => {
         target: 'robonomics',
         status: 'submitted',
         cid: 'bafybeigdyrzt',
-        tx_hash: '0x123'
+        tx_hash: '0x123',
       })
     ).toBeTruthy();
   });
@@ -82,7 +87,7 @@ describe('contracts', () => {
         occurred_at: '2026-01-01T00:00:00Z',
         source: 'endpoint',
         payload: {},
-        extra_field: true
+        extra_field: true,
       })
     ).toThrow();
   });
@@ -94,7 +99,7 @@ describe('contracts', () => {
         event_version: 'v1',
         occurred_at: 'not-a-date',
         source: 'endpoint',
-        payload: {}
+        payload: {},
       })
     ).toThrow();
   });
@@ -103,10 +108,10 @@ describe('contracts', () => {
     expect(() =>
       telemetryAuthorizedPayloadSchema.parse({
         sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: 'invalid',
-        signature: '0xabc'
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: 'invalid',
+        signature: '0xabc',
       })
     ).toThrow();
   });
@@ -116,7 +121,9 @@ describe('contracts', () => {
     expect(TELEMETRY_TOPICS.REJECTED).toBe('telemetry.rejected.v1');
     expect(TELEMETRY_TOPICS.PUBSUB_RESULT).toBe('telemetry.pubsub.result.v1');
     expect(TELEMETRY_TOPICS.IPFS_RESULT).toBe('telemetry.ipfs.result.v1');
-    expect(TELEMETRY_TOPICS.BLOCKCHAIN_RESULT).toBe('telemetry.blockchain.result.v1');
+    expect(TELEMETRY_TOPICS.BLOCKCHAIN_RESULT).toBe(
+      'telemetry.blockchain.result.v1'
+    );
     expect(TELEMETRY_TOPICS.RETRY).toBe('telemetry.retry.v1');
     expect(TELEMETRY_TOPICS.DLQ).toBe('telemetry.dlq.v1');
     expect(Object.isFrozen(TELEMETRY_TOPICS)).toBe(true);
@@ -130,17 +137,17 @@ describe('contracts', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'endpoint',
       payload: {
-        sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: { temp: 21.4 },
-        signature: '0xabc'
-      }
+        sensor_id: Buffer.alloc(32, 1).toString('base64'),
+        timestamp: Date.now(),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: Buffer.from('payload').toString('base64'),
+        signature: Buffer.alloc(64, 3).toString('base64'),
+      },
     });
     expect(envelopeResult.success).toBe(true);
 
     const payloadResult = validatePayloadForEventType('telemetry.rejected.v1', {
-      reason_code: 'invalid_signature'
+      reason_code: 'invalid_signature',
     });
     expect(payloadResult.success).toBe(true);
 
@@ -150,9 +157,22 @@ describe('contracts', () => {
       event_version: 'v1',
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'endpoint',
-      payload: {}
+      payload: {},
     });
     expect(unknownTypeResult.success).toBe(false);
+  });
+
+  it('validates signed envelope protobuf bytes', () => {
+    const envelope = createSignedEnvelope({
+      sensorId: Buffer.alloc(32, 1),
+      timestamp: BigInt(Date.now()),
+      nonce: Buffer.alloc(16, 2),
+      message: Buffer.from('abc'),
+      signature: Buffer.alloc(64, 4),
+    });
+    const parsed = validateSignedEnvelope(toSignedEnvelopeBytes(envelope));
+    expect(parsed.sensorId.length).toBe(32);
+    expect(parsed.signature.length).toBe(64);
   });
 
   it('enforces ordered processing and commit-after-result guardrail', async () => {
@@ -182,8 +202,8 @@ describe('contracts', () => {
           },
           async publishDlq() {
             calls.push('dlq');
-          }
-        }
+          },
+        },
       }
     );
 
@@ -193,7 +213,7 @@ describe('contracts', () => {
       'confirmation',
       'emit-result',
       'publish-result',
-      'commit'
+      'commit',
     ]);
   });
 
@@ -205,7 +225,7 @@ describe('contracts', () => {
         retryPolicy: {
           maxAttempts: 1,
           getEventId: (event) => event.event_id,
-          store: new InMemoryRetryCounterStore()
+          store: new InMemoryRetryCounterStore(),
         },
         performExternalAction: async () => {
           calls.push('side-effect');
@@ -230,8 +250,8 @@ describe('contracts', () => {
           },
           async publishDlq() {
             calls.push('dlq');
-          }
-        }
+          },
+        },
       }
     );
 
@@ -251,7 +271,7 @@ describe('contracts', () => {
         retryPolicy: {
           maxAttempts: 2,
           getEventId: (current) => current.event_id,
-          store: retryStore
+          store: retryStore,
         },
         performExternalAction: async () => {
           throw new Error('transient');
@@ -268,8 +288,8 @@ describe('contracts', () => {
           },
           async publishDlq(_current, _reason, context) {
             dlqCalls.push(context?.attempt ?? -1);
-          }
-        }
+          },
+        },
       });
 
     await expect(runFailingAttempt()).resolves.toBe('retried');
@@ -301,8 +321,8 @@ describe('contracts', () => {
           },
           async publishDlq() {
             calls.push('dlq');
-          }
-        }
+          },
+        },
       }
     );
 
@@ -320,7 +340,7 @@ describe('contracts', () => {
           hasProcessed: async () => true,
           markProcessed: async () => {
             calls.push('mark');
-          }
+          },
         },
         performExternalAction: async () => {
           calls.push('side-effect');
@@ -337,8 +357,8 @@ describe('contracts', () => {
         },
         retryDlqPublisher: {
           async publishRetry() {},
-          async publishDlq() {}
-        }
+          async publishDlq() {},
+        },
       }
     );
 

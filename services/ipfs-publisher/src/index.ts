@@ -3,7 +3,7 @@ import {
   runConsumerProcessingRule,
   TELEMETRY_TOPICS,
   type RetryDlqPublisher,
-  type TelemetryAuthorizedPayload
+  type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
 import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +18,8 @@ interface AuthorizedBatch {
 
 const logger = pino({
   name: 'ipfs-publisher',
-  level: process.env.IPFS_PUBLISHER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.IPFS_PUBLISHER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -29,11 +30,15 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
@@ -41,7 +46,10 @@ function logError(message: string, error: unknown, context?: Record<string, unkn
 
 export async function startIpfsPublisher(): Promise<void> {
   const config = loadIpfsPublisherConfig();
-  const kafka = new Kafka({ clientId: 'ipfs-publisher', brokers: ['localhost:9092'] });
+  const kafka = new Kafka({
+    clientId: 'ipfs-publisher',
+    brokers: ['localhost:9092'],
+  });
   void kafka;
 
   const batch: AuthorizedBatch = {
@@ -49,28 +57,36 @@ export async function startIpfsPublisher(): Promise<void> {
     events: [
       {
         sensor_id: 'sensor-dev-1',
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         nonce: 'nonce-dev',
-        measurements: { temp: 22 },
-        signature: '0x00'
-      }
-    ]
+        message: Buffer.from(JSON.stringify({ temp: 22 })).toString('base64'),
+        signature: '0x00',
+      },
+    ],
   };
 
   const retryDlqPublisher: RetryDlqPublisher<AuthorizedBatch> = {
     async publishRetry(event, reason) {
-      logWarn('retry stub', { topic: TELEMETRY_TOPICS.RETRY, batchId: event.batch_id, reason });
+      logWarn('retry stub', {
+        topic: TELEMETRY_TOPICS.RETRY,
+        batchId: event.batch_id,
+        reason,
+      });
     },
     async publishDlq(event, reason) {
-      logWarn('dlq stub', { topic: TELEMETRY_TOPICS.DLQ, batchId: event.batch_id, reason });
-    }
+      logWarn('dlq stub', {
+        topic: TELEMETRY_TOPICS.DLQ,
+        batchId: event.batch_id,
+        reason,
+      });
+    },
   };
 
   await runConsumerProcessingRule(batch, {
     dedup: {
       keyType: 'batch_id',
       getKeyValue: (event) => event.batch_id,
-      store: new InMemoryDedupStore()
+      store: new InMemoryDedupStore(),
     },
     performExternalAction: async () => {
       // TODO: deterministic batching + serialize object/CAR.
@@ -87,8 +103,8 @@ export async function startIpfsPublisher(): Promise<void> {
       source: 'ipfs-publisher',
       payload: {
         cid: 'bafybeidevstubcid',
-        event_count: event.events.length
-      }
+        event_count: event.events.length,
+      },
     }),
     publishResultEvent: async (result) => {
       logInfo('result stub', { result });
@@ -96,7 +112,7 @@ export async function startIpfsPublisher(): Promise<void> {
     commitOffset: async () => {
       logInfo('commit offset stub');
     },
-    retryDlqPublisher
+    retryDlqPublisher,
   });
 
   logInfo('started in stub mode', { ipfsApiUrl: config.ipfsApiUrl });

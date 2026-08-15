@@ -17,7 +17,11 @@ describe('loadWhitelistConfig', () => {
 
     const config = loadWhitelistConfig();
 
-    expect(config.allowedSensorIds).toEqual(['sensor-1', 'sensor-2', 'sensor-3']);
+    expect(config.allowedSensorIds).toEqual([
+      'sensor-1',
+      'sensor-2',
+      'sensor-3',
+    ]);
   });
 
   it('should trim whitespace from sensor IDs', () => {
@@ -25,7 +29,11 @@ describe('loadWhitelistConfig', () => {
 
     const config = loadWhitelistConfig();
 
-    expect(config.allowedSensorIds).toEqual(['sensor-1', 'sensor-2', 'sensor-3']);
+    expect(config.allowedSensorIds).toEqual([
+      'sensor-1',
+      'sensor-2',
+      'sensor-3',
+    ]);
   });
 
   it('should filter empty sensor IDs', () => {

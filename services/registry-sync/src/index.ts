@@ -2,16 +2,23 @@ import { runConsumerProcessingRule, TELEMETRY_TOPICS } from '@scp/contracts';
 import Redis from 'ioredis';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { SubstrateFinalizedRegistryEventSource, type FinalizedRegistryEventSource } from './chain-source.js';
+import {
+  SubstrateFinalizedRegistryEventSource,
+  type FinalizedRegistryEventSource,
+} from './chain-source.js';
 import { loadRegistrySyncConfig, type RegistrySyncConfig } from './config.js';
 import {
   createRedisKeyspace,
   mapRegistryEventToUpdate,
   toChainEventId,
-  type RegistryEvent
+  type RegistryEvent,
 } from './keyspace.js';
 import { logDebug, logError, logInfo, logWarn } from './logger.js';
-import { RedisProjectionStore, RedisRetryCounterStore, type RedisLike } from './projection-store.js';
+import {
+  RedisProjectionStore,
+  RedisRetryCounterStore,
+  type RedisLike,
+} from './projection-store.js';
 
 export * from './chain-source.js';
 export * from './config.js';
@@ -53,7 +60,9 @@ export function createRegistrySyncService(
   const keyspace = createRedisKeyspace(config.redisKeyPrefix);
   const projectionStore = new RedisProjectionStore(redis, keyspace);
   const retryStore = new RedisRetryCounterStore(redis, keyspace);
-  const eventSource = deps.eventSource ?? new SubstrateFinalizedRegistryEventSource(config.substrateWsUrl);
+  const eventSource =
+    deps.eventSource ??
+    new SubstrateFinalizedRegistryEventSource(config.substrateWsUrl);
   const sleep = deps.sleep ?? defaultSleep;
 
   let started = false;
@@ -64,7 +73,7 @@ export function createRegistrySyncService(
     updateCount: 0,
     failureCount: 0,
     retryCount: 0,
-    dlqCount: 0
+    dlqCount: 0,
   };
 
   async function processEvent(event: RegistryEvent): Promise<void> {
@@ -75,34 +84,38 @@ export function createRegistrySyncService(
       eventIndex: event.eventIndex,
       section: event.section,
       method: event.method,
-      sensorId: event.sensorId
+      sensorId: event.sensorId,
     });
     logStructured('processing_registry_event', {
       eventId,
       blockHeight: event.blockHeight,
       eventIndex: event.eventIndex,
       section: event.section,
-      method: event.method
+      method: event.method,
     });
-    metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, event.blockHeight);
+    metrics.latestFinalizedHeight = Math.max(
+      metrics.latestFinalizedHeight,
+      event.blockHeight
+    );
 
     let pending = true;
     let loopAttempt = 1;
     while (pending) {
       logDebug('running consumer processing rule', {
         eventId,
-        loopAttempt
+        loopAttempt,
       });
       const result = await runConsumerProcessingRule(event, {
         retryPolicy: {
           maxAttempts: config.maxRetries,
           getEventId: (current) => toChainEventId(current),
-          store: retryStore
+          store: retryStore,
         },
         idempotency: {
           getEventId: (current) => toChainEventId(current),
           hasProcessed: (candidate) => projectionStore.hasProcessed(candidate),
-          markProcessed: (candidate) => projectionStore.markProcessed(candidate)
+          markProcessed: (candidate) =>
+            projectionStore.markProcessed(candidate),
         },
         performExternalAction: async (current) => {
           const projection = mapRegistryEventToUpdate(current);
@@ -112,7 +125,7 @@ export function createRegistrySyncService(
 
           await projectionStore.applyProjection(projection, {
             updatedAtBlock: current.blockHeight,
-            updatedAtEvent: eventId
+            updatedAtEvent: eventId,
           });
 
           metrics.updateCount += 1;
@@ -123,14 +136,14 @@ export function createRegistrySyncService(
             section: current.section,
             method: current.method,
             sensorId: projection.sensorId,
-            enabled: projection.enabled
+            enabled: projection.enabled,
           });
         },
         waitForConfirmation: async () => {},
         emitResultEvent: async (current) => ({
           type: 'registry-sync.result',
           eventId,
-          blockHeight: current.blockHeight
+          blockHeight: current.blockHeight,
         }),
         publishResultEvent: async () => {},
         commitOffset: async () => {
@@ -148,7 +161,7 @@ export function createRegistrySyncService(
               attempt: context?.attempt,
               maxAttempts: context?.maxAttempts,
               blockHeight: event.blockHeight,
-              eventIndex: event.eventIndex
+              eventIndex: event.eventIndex,
             });
           },
           publishDlq: async (failedEvent, reason, context) => {
@@ -162,7 +175,7 @@ export function createRegistrySyncService(
               context,
               section: failedEvent.section,
               method: failedEvent.method,
-              rawData: failedEvent.rawData
+              rawData: failedEvent.rawData,
             });
             logStructured('projection_dlq', {
               eventId,
@@ -171,20 +184,20 @@ export function createRegistrySyncService(
               attempt: context?.attempt,
               maxAttempts: context?.maxAttempts,
               blockHeight: event.blockHeight,
-              eventIndex: event.eventIndex
+              eventIndex: event.eventIndex,
             });
-          }
-        }
+          },
+        },
       });
 
       if (result === 'retried') {
         logDebug('consumer processing requested retry', {
           eventId,
-          attempt: loopAttempt
+          attempt: loopAttempt,
         });
         logStructured('retry_backoff_wait', {
           eventId,
-          retryBackoffMs: config.retryBackoffMs
+          retryBackoffMs: config.retryBackoffMs,
         });
         await sleep(config.retryBackoffMs);
         loopAttempt += 1;
@@ -195,7 +208,7 @@ export function createRegistrySyncService(
         logWarn('registry event routed to DLQ', {
           eventId,
           blockHeight: event.blockHeight,
-          eventIndex: event.eventIndex
+          eventIndex: event.eventIndex,
         });
         await projectionStore.commitCursorHeight(event.blockHeight);
         metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
@@ -205,7 +218,7 @@ export function createRegistrySyncService(
         eventId,
         result,
         syncHeight: metrics.syncHeight,
-        latestFinalizedHeight: metrics.latestFinalizedHeight
+        latestFinalizedHeight: metrics.latestFinalizedHeight,
       });
       pending = false;
     }
@@ -224,26 +237,27 @@ export function createRegistrySyncService(
         redisKeyPrefix: config.redisKeyPrefix,
         maxRetries: config.maxRetries,
         retryBackoffMs: config.retryBackoffMs,
-        healthPort: config.healthPort
+        healthPort: config.healthPort,
       });
       await eventSource.connect();
       logDebug('connected event source, loading cursor and finalized height');
       metrics.syncHeight = await projectionStore.loadCursorHeight();
-      metrics.latestFinalizedHeight = await eventSource.getLatestFinalizedHeight();
+      metrics.latestFinalizedHeight =
+        await eventSource.getLatestFinalizedHeight();
       logInfo('registry sync cursor loaded', {
         syncHeight: metrics.syncHeight,
-        latestFinalizedHeight: metrics.latestFinalizedHeight
+        latestFinalizedHeight: metrics.latestFinalizedHeight,
       });
 
       if (deps.enableHealthServer ?? true) {
         healthServer = startHealthAndMetricsServer(config.healthPort, metrics);
         logInfo('registry sync health server started', {
-          healthPort: config.healthPort
+          healthPort: config.healthPort,
         });
       }
 
       logInfo('registry sync starting finalized event stream', {
-        fromHeight: metrics.syncHeight + 1
+        fromHeight: metrics.syncHeight + 1,
       });
       await eventSource.startFrom(
         metrics.syncHeight + 1,
@@ -253,11 +267,14 @@ export function createRegistrySyncService(
         async (height) => {
           await projectionStore.commitCursorHeight(height);
           metrics.syncHeight = Math.max(metrics.syncHeight, height);
-          metrics.latestFinalizedHeight = Math.max(metrics.latestFinalizedHeight, height);
+          metrics.latestFinalizedHeight = Math.max(
+            metrics.latestFinalizedHeight,
+            height
+          );
           logDebug('advanced sync cursor from finalized head', {
             height,
             syncHeight: metrics.syncHeight,
-            latestFinalizedHeight: metrics.latestFinalizedHeight
+            latestFinalizedHeight: metrics.latestFinalizedHeight,
           });
         }
       );
@@ -266,7 +283,7 @@ export function createRegistrySyncService(
         substrateWsUrl: config.substrateWsUrl,
         redisUrl: config.redisUrl,
         redisKeyPrefix: config.redisKeyPrefix,
-        syncHeight: metrics.syncHeight
+        syncHeight: metrics.syncHeight,
       });
     },
     async stop(): Promise<void> {
@@ -304,16 +321,19 @@ export function createRegistrySyncService(
         updateCount: metrics.updateCount,
         failureCount: metrics.failureCount,
         retryCount: metrics.retryCount,
-        dlqCount: metrics.dlqCount
+        dlqCount: metrics.dlqCount,
       });
     },
     getMetrics(): Readonly<RegistrySyncMetrics> {
       return metrics;
-    }
+    },
   };
 }
 
-function startHealthAndMetricsServer(port: number, metrics: RegistrySyncMetrics): Server {
+function startHealthAndMetricsServer(
+  port: number,
+  metrics: RegistrySyncMetrics
+): Server {
   const server = createServer((request, response) => {
     if (request.url === '/health') {
       response.statusCode = 200;
@@ -323,7 +343,7 @@ function startHealthAndMetricsServer(port: number, metrics: RegistrySyncMetrics)
           status: 'ok',
           sync_height: metrics.syncHeight,
           latest_finalized_height: metrics.latestFinalizedHeight,
-          lag: Math.max(metrics.latestFinalizedHeight - metrics.syncHeight, 0)
+          lag: Math.max(metrics.latestFinalizedHeight - metrics.syncHeight, 0),
         })
       );
       return;
@@ -332,26 +352,28 @@ function startHealthAndMetricsServer(port: number, metrics: RegistrySyncMetrics)
     if (request.url === '/metrics') {
       response.statusCode = 200;
       response.setHeader('content-type', 'text/plain; version=0.0.4');
-      response.end([
-        '# HELP registry_sync_height Current synced finalized block height.',
-        '# TYPE registry_sync_height gauge',
-        `registry_sync_height ${metrics.syncHeight}`,
-        '# HELP registry_sync_lag Finalized height lag.',
-        '# TYPE registry_sync_lag gauge',
-        `registry_sync_lag ${Math.max(metrics.latestFinalizedHeight - metrics.syncHeight, 0)}`,
-        '# HELP registry_sync_updates_total Projection updates applied.',
-        '# TYPE registry_sync_updates_total counter',
-        `registry_sync_updates_total ${metrics.updateCount}`,
-        '# HELP registry_sync_failures_total Processing failures.',
-        '# TYPE registry_sync_failures_total counter',
-        `registry_sync_failures_total ${metrics.failureCount}`,
-        '# HELP registry_sync_retries_total Processing retries.',
-        '# TYPE registry_sync_retries_total counter',
-        `registry_sync_retries_total ${metrics.retryCount}`,
-        '# HELP registry_sync_dlq_total DLQ events emitted.',
-        '# TYPE registry_sync_dlq_total counter',
-        `registry_sync_dlq_total ${metrics.dlqCount}`
-      ].join('\n'));
+      response.end(
+        [
+          '# HELP registry_sync_height Current synced finalized block height.',
+          '# TYPE registry_sync_height gauge',
+          `registry_sync_height ${metrics.syncHeight}`,
+          '# HELP registry_sync_lag Finalized height lag.',
+          '# TYPE registry_sync_lag gauge',
+          `registry_sync_lag ${Math.max(metrics.latestFinalizedHeight - metrics.syncHeight, 0)}`,
+          '# HELP registry_sync_updates_total Projection updates applied.',
+          '# TYPE registry_sync_updates_total counter',
+          `registry_sync_updates_total ${metrics.updateCount}`,
+          '# HELP registry_sync_failures_total Processing failures.',
+          '# TYPE registry_sync_failures_total counter',
+          `registry_sync_failures_total ${metrics.failureCount}`,
+          '# HELP registry_sync_retries_total Processing retries.',
+          '# TYPE registry_sync_retries_total counter',
+          `registry_sync_retries_total ${metrics.retryCount}`,
+          '# HELP registry_sync_dlq_total DLQ events emitted.',
+          '# TYPE registry_sync_dlq_total counter',
+          `registry_sync_dlq_total ${metrics.dlqCount}`,
+        ].join('\n')
+      );
       return;
     }
 

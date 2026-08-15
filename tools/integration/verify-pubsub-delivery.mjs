@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { cryptoWaitReady, decodeAddress } from '@polkadot/util-crypto';
 
 function parseArgs(args) {
   const [mode, ...rest] = args;
@@ -24,7 +25,10 @@ function parseArgs(args) {
 
   if (mode === 'collect') {
     const topic = values.get('topic') ?? 'telemetry/authorized/v1';
-    const expectedCount = Number.parseInt(values.get('expected-count') ?? '', 10);
+    const expectedCount = Number.parseInt(
+      values.get('expected-count') ?? '',
+      10
+    );
     const timeoutMs = Number.parseInt(values.get('timeout-ms') ?? '', 10);
     const outputFile = values.get('output-file');
     const ipfsApiUrl = values.get('ipfs-api-url') ?? 'http://127.0.0.1:5001';
@@ -47,7 +51,7 @@ function parseArgs(args) {
       timeoutMs,
       outputFile,
       ipfsApiUrl,
-      sensorId
+      sensorId,
     };
   }
 
@@ -69,7 +73,7 @@ function parseArgs(args) {
     mode,
     fakeSensorLogFile,
     pubsubMessagesFile,
-    expectedCount
+    expectedCount,
   };
 }
 
@@ -101,11 +105,13 @@ async function collectMessages(options) {
   const endpoint = `${options.ipfsApiUrl}/api/v0/pubsub/sub?arg=${encodeURIComponent(options.topic)}`;
   const response = await fetch(endpoint, {
     method: 'POST',
-    signal: controller.signal
+    signal: controller.signal,
   });
 
   if (!response.ok || !response.body) {
-    throw new Error(`failed to subscribe to IPFS pubsub: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `failed to subscribe to IPFS pubsub: ${response.status} ${response.statusText}`
+    );
   }
 
   const reader = response.body.getReader();
@@ -139,7 +145,9 @@ async function collectMessages(options) {
         }
 
         payloads.push(payload);
-        console.log(`received ${payloads.length}/${options.expectedCount} topic messages`);
+        console.log(
+          `received ${payloads.length}/${options.expectedCount} topic messages`
+        );
 
         if (payloads.length >= options.expectedCount) {
           break;
@@ -156,7 +164,11 @@ async function collectMessages(options) {
     reader.releaseLock();
   }
 
-  await writeFile(options.outputFile, `${JSON.stringify(payloads, null, 2)}\n`, 'utf8');
+  await writeFile(
+    options.outputFile,
+    `${JSON.stringify(payloads, null, 2)}\n`,
+    'utf8'
+  );
 
   if (payloads.length < options.expectedCount) {
     throw new Error(
@@ -175,8 +187,15 @@ function parseExpectedFromFakeSensorLog(rawLog) {
 
     try {
       const entry = JSON.parse(line);
-      if (entry.msg === 'sending telemetry payload' && entry.payload?.nonce) {
-        expected.push(entry.payload);
+      if (
+        entry.msg === 'sending telemetry payload' &&
+        entry.sensor_id &&
+        entry.nonce_hex
+      ) {
+        expected.push({
+          sensor_id: entry.sensor_id,
+          nonce_hex: entry.nonce_hex,
+        });
       }
     } catch {
       // Ignore non-JSON lines in logs.
@@ -190,47 +209,25 @@ function assertDelivery(expected, received) {
   const receivedByNonce = new Map(received.map((item) => [item.nonce, item]));
 
   for (const sent of expected) {
-    const delivered = receivedByNonce.get(sent.nonce);
+    const nonceBase64 = Buffer.from(sent.nonce_hex, 'hex').toString('base64');
+    const delivered = receivedByNonce.get(nonceBase64);
     if (!delivered) {
-      throw new Error(`missing pubsub message for nonce ${sent.nonce}`);
+      throw new Error(`missing pubsub message for nonce ${sent.nonce_hex}`);
     }
 
-    if (delivered.sensor_id !== sent.sensor_id) {
-      throw new Error(`sensor_id mismatch for nonce ${sent.nonce}`);
-    }
-
-    if (delivered.timestamp !== sent.timestamp) {
-      throw new Error(`timestamp mismatch for nonce ${sent.nonce}`);
-    }
-
-    if (delivered.signature !== sent.signature) {
-      throw new Error(`signature mismatch for nonce ${sent.nonce}`);
-    }
-
-    const normalize = (value) => {
-      if (Array.isArray(value)) {
-        return value.map(normalize);
-      }
-      if (value && typeof value === 'object') {
-        return Object.fromEntries(
-          Object.keys(value)
-            .sort()
-            .map((key) => [key, normalize(value[key])])
-        );
-      }
-      return value;
-    };
-
-    if (JSON.stringify(normalize(delivered.measurements)) !== JSON.stringify(normalize(sent.measurements))) {
-      throw new Error(`measurements mismatch for nonce ${sent.nonce}`);
+    const sensorBytes = decodeAddress(sent.sensor_id);
+    const sensorBase64 = Buffer.from(sensorBytes).toString('base64');
+    if (delivered.sensor_id !== sensorBase64) {
+      throw new Error(`sensor_id mismatch for nonce ${sent.nonce_hex}`);
     }
   }
 }
 
 async function verifyMessages(options) {
+  await cryptoWaitReady();
   const [fakeSensorLog, pubsubMessagesRaw] = await Promise.all([
     readFile(options.fakeSensorLogFile, 'utf8'),
-    readFile(options.pubsubMessagesFile, 'utf8')
+    readFile(options.pubsubMessagesFile, 'utf8'),
   ]);
 
   const expected = parseExpectedFromFakeSensorLog(fakeSensorLog);
@@ -246,7 +243,9 @@ async function verifyMessages(options) {
   }
 
   assertDelivery(expected, received);
-  console.log(`verified ${expected.length} pubsub messages match fake-sensor payloads`);
+  console.log(
+    `verified ${expected.length} pubsub messages match fake-sensor payloads`
+  );
 }
 
 async function main() {

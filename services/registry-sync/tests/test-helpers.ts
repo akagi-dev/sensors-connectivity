@@ -31,7 +31,11 @@ export class FakeRedis implements RedisLike {
     return 'OK';
   }
 
-  async eval(_script: string, numkeys: number, ...args: string[]): Promise<number> {
+  async eval(
+    _script: string,
+    numkeys: number,
+    ...args: string[]
+  ): Promise<number> {
     if (numkeys !== 1 || args.length < 2) {
       return 0;
     }
@@ -121,7 +125,10 @@ export class FixtureEventSource implements FinalizedRegistryEventSource {
   }
 
   async getLatestFinalizedHeight(): Promise<number> {
-    return this.events.reduce((max, current) => Math.max(max, current.blockHeight), 0);
+    return this.events.reduce(
+      (max, current) => Math.max(max, current.blockHeight),
+      0
+    );
   }
 
   async startFrom(

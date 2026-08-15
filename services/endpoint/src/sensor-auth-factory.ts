@@ -20,14 +20,16 @@ export interface SensorAuthConfig {
  * Environment variables:
  * - SENSOR_AUTH_STRATEGY: Authentication strategy to use (registry-sync or whitelist)
  */
-export function loadSensorAuthConfig(env: NodeJS.ProcessEnv = process.env): SensorAuthConfig {
+export function loadSensorAuthConfig(
+  env: NodeJS.ProcessEnv = process.env
+): SensorAuthConfig {
   const strategyStr = env.SENSOR_AUTH_STRATEGY ?? 'registry-sync';
   const strategy = strategyStr === 'whitelist' ? 'whitelist' : 'registry-sync';
 
   if (strategyStr !== strategy) {
     logWarn('invalid SENSOR_AUTH_STRATEGY, defaulting to registry-sync', {
       provided: strategyStr,
-      using: strategy
+      using: strategy,
     });
   }
 
@@ -51,7 +53,7 @@ export function createSensorAuthProvider(
   if (strategy === 'whitelist') {
     const whitelistConfig = loadWhitelistConfig();
     const whitelistAuth = new WhitelistAuth(whitelistConfig.allowedSensorIds);
-    
+
     // Adapt WhitelistAuth to RegistryReader interface
     return {
       async authenticate(sensorId: string): Promise<boolean> {
@@ -64,7 +66,7 @@ export function createSensorAuthProvider(
         }
         return {
           sensorId,
-          enabled: true
+          enabled: true,
         };
       },
       async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
@@ -72,7 +74,7 @@ export function createSensorAuthProvider(
       },
       async rememberNonce(sensorId: string, nonce: string): Promise<void> {
         await whitelistAuth.rememberNonce(sensorId, nonce);
-      }
+      },
     };
   }
 

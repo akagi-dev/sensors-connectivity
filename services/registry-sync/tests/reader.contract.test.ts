@@ -12,7 +12,7 @@ describe('endpoint read contract from redis projection', () => {
       sensor_id: 'sensor-1',
       enabled: 'true',
       updated_at_block: '100',
-      updated_at_event: '100:0'
+      updated_at_event: '100:0',
     });
 
     const reader = new RedisRegistryReader(redis, 'registry-sync:v1', 900);
@@ -20,7 +20,7 @@ describe('endpoint read contract from redis projection', () => {
 
     expect(record).toEqual({
       sensorId: 'sensor-1',
-      enabled: true
+      enabled: true,
     });
 
     expect(await reader.isNonceSeen('sensor-1', 'n-1')).toBe(false);

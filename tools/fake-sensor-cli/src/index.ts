@@ -1,7 +1,17 @@
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import { canonicalize } from 'json-canonicalize';
-import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import {
+  cryptoWaitReady,
+  ed25519PairFromSeed,
+  ed25519Sign,
+  encodeAddress,
+} from '@polkadot/util-crypto';
+import protobuf from 'protobufjs';
+import {
+  buildEnvelopeSigningBytes,
+  createSignedEnvelope,
+  toSignedEnvelopeBytes,
+} from '@scp/contracts';
 import pino from 'pino';
 
 export interface FakeSensorCliOptions {
@@ -16,11 +26,56 @@ export interface FakeSensorCliOptions {
 const DEFAULT_ENDPOINT_URL = 'http://localhost:3000/v1/telemetry';
 const DEFAULT_COUNT = 1;
 const DEFAULT_INTERVAL_MS = 1000;
-const DEFAULT_SIGNER_SEED_HEX = '0x0000000000000000000000000000000000000000000000000000000000000001';
+const DEFAULT_SIGNER_SEED_HEX =
+  '0x0000000000000000000000000000000000000000000000000000000000000001';
+
+const coreMessageRoot = new protobuf.Root();
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('Measurement').add(
+      new protobuf.Field('value', 1, 'double')
+    )
+  );
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('Bme280')
+      .add(new protobuf.Field('temperature', 1, 'Measurement'))
+      .add(new protobuf.Field('humidity', 2, 'Measurement'))
+  );
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('PublicSensor').add(
+      new protobuf.Field('bme280', 2, 'Bme280')
+    )
+  );
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('Urban').add(
+      new protobuf.Field('sensors', 1, 'PublicSensor', 'repeated')
+    )
+  );
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('Metadata').add(new protobuf.Field('owner', 1, 'bytes'))
+  );
+coreMessageRoot
+  .define('core.v1')
+  .add(
+    new protobuf.Type('Message')
+      .add(new protobuf.Field('metadata', 1, 'Metadata', 'repeated'))
+      .add(new protobuf.Field('urban', 2, 'Urban', 'repeated'))
+  );
+const coreMessageCodec = coreMessageRoot.lookupType('core.v1.Message');
 
 const logger = pino({
   name: 'fake-sensor-cli',
-  level: process.env.FAKE_SENSOR_CLI_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.FAKE_SENSOR_CLI_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -31,17 +86,24 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
 }
 
-export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv): FakeSensorCliOptions {
+export function parseFakeSensorCliOptions(
+  args: string[],
+  env: NodeJS.ProcessEnv
+): FakeSensorCliOptions {
   const argValues = new Map<string, string>();
   const supportedKeys = new Set([
     'endpoint',
@@ -50,7 +112,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     'interval-ms',
     'sensor-zone',
     'sensor-id',
-    'sensor-id'
+    'sensor-id',
   ]);
 
   for (let i = 0; i < args.length; i += 1) {
@@ -73,7 +135,9 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     }
 
     const nextToken = args[i + 1];
-    const value = inlineValue ?? (nextToken && !nextToken.startsWith('--') ? nextToken : undefined);
+    const value =
+      inlineValue ??
+      (nextToken && !nextToken.startsWith('--') ? nextToken : undefined);
     if (value === undefined) {
       throw new Error(`Missing value for --${key}`);
     }
@@ -84,18 +148,29 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     argValues.set(key, value);
   }
 
-  const endpointUrl = argValues.get('endpoint') ?? env.SENSOR_FAKE_ENDPOINT_URL ?? DEFAULT_ENDPOINT_URL;
-  const signerSeedHex = argValues.get('signer-seed-hex') ?? env.SENSOR_FAKE_SIGNER_SEED_HEX ?? DEFAULT_SIGNER_SEED_HEX;
-  const count = parsePositiveInteger(argValues.get('count') ?? env.SENSOR_FAKE_COUNT, DEFAULT_COUNT);
-  const intervalMs = parseNonNegativeInteger(argValues.get('interval-ms') ?? env.SENSOR_FAKE_INTERVAL_MS, DEFAULT_INTERVAL_MS);
-  const sensorZone = argValues.get('sensor-zone') ?? env.SENSOR_FAKE_SENSOR_ZONE;
+  const endpointUrl =
+    argValues.get('endpoint') ??
+    env.SENSOR_FAKE_ENDPOINT_URL ??
+    DEFAULT_ENDPOINT_URL;
+  const signerSeedHex =
+    argValues.get('signer-seed-hex') ??
+    env.SENSOR_FAKE_SIGNER_SEED_HEX ??
+    DEFAULT_SIGNER_SEED_HEX;
+  const count = parsePositiveInteger(
+    argValues.get('count') ?? env.SENSOR_FAKE_COUNT,
+    DEFAULT_COUNT
+  );
+  const intervalMs = parseNonNegativeInteger(
+    argValues.get('interval-ms') ?? env.SENSOR_FAKE_INTERVAL_MS,
+    DEFAULT_INTERVAL_MS
+  );
+  const sensorZone =
+    argValues.get('sensor-zone') ?? env.SENSOR_FAKE_SENSOR_ZONE;
   const seed = parseSeedHex(signerSeedHex);
   const signer = ed25519PairFromSeed(seed);
   const derivedAddress = encodeAddress(signer.publicKey);
   const sensorId =
-    argValues.get('sensor-id') ??
-    env.SENSOR_FAKE_SENSOR_ID ??
-    derivedAddress;
+    argValues.get('sensor-id') ?? env.SENSOR_FAKE_SENSOR_ID ?? derivedAddress;
 
   if (sensorId !== derivedAddress) {
     throw new Error(`sensor id does not match signer seed: ${sensorId}`);
@@ -106,7 +181,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     sensorId,
     count,
     intervalMs,
-    signerSeedHex
+    signerSeedHex,
   };
 
   if (sensorZone) {
@@ -116,19 +191,17 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   return options;
 }
 
-export function createFakePayload(sensorId: string) {
-  return {
-    sensor_id: sensorId,
-    timestamp: new Date().toISOString(),
-    nonce: randomUUID(),
-    measurements: {
-      temperature_c: Number((18 + Math.random() * 8).toFixed(2)),
-      humidity_pct: Number((30 + Math.random() * 40).toFixed(2))
-    }
-  };
+export interface FakeEnvelopePayload {
+  envelopeBytes: Uint8Array;
+  sensorAddress: string;
+  timestamp: bigint;
+  nonce: Uint8Array;
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number
+): number {
   if (value === undefined) {
     return fallback;
   }
@@ -141,7 +214,10 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   return parsed;
 }
 
-function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
+function parseNonNegativeInteger(
+  value: string | undefined,
+  fallback: number
+): number {
   if (value === undefined) {
     return fallback;
   }
@@ -162,15 +238,74 @@ function parseSeedHex(seedHex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(normalizedSeed, 'hex'));
 }
 
-function signPayload(
-  payload: ReturnType<typeof createFakePayload>,
+function createCoreMessageBytes(
+  ownerPublicKey: Uint8Array,
+  temperatureCelsius: number,
+  humidityPercent: number
+): Uint8Array {
+  const payload = {
+    metadata: [{ owner: ownerPublicKey }],
+    urban: [
+      {
+        sensors: [
+          { bme280: { temperature: { value: temperatureCelsius } } },
+          { bme280: { humidity: { value: humidityPercent } } },
+        ],
+      },
+    ],
+  };
+  const verifyError = coreMessageCodec.verify(payload);
+  if (verifyError) {
+    throw new Error(`Invalid core.v1.Message payload: ${verifyError}`);
+  }
+  return coreMessageCodec.encode(coreMessageCodec.create(payload)).finish();
+}
+
+export interface DecodedCoreMessage {
+  metadata?: Array<{ owner?: Uint8Array }>;
+  urban?: Array<{
+    sensors?: Array<{
+      bme280?: {
+        temperature?: { value?: number };
+        humidity?: { value?: number };
+      };
+    }>;
+  }>;
+}
+
+export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
+  return coreMessageCodec.toObject(coreMessageCodec.decode(bytes), {
+    bytes: Uint8Array,
+  }) as DecodedCoreMessage;
+}
+
+export function createFakeEnvelopePayload(
   signerSeedHex: string
-): string {
+): FakeEnvelopePayload {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
-  const canonicalMeasurements = canonicalize(payload.measurements);
-  const message = `${canonicalMeasurements}${payload.timestamp}${payload.nonce}${payload.sensor_id}`;
-  const signature = ed25519Sign(new TextEncoder().encode(message), pair);
-  return Buffer.from(signature).toString('base64');
+  const temperature = Number((18 + Math.random() * 8).toFixed(2));
+  const humidity = Number((30 + Math.random() * 40).toFixed(2));
+  const messageBytes = createCoreMessageBytes(
+    pair.publicKey,
+    temperature,
+    humidity
+  );
+  const timestamp = BigInt(Date.now());
+  const nonce = randomBytes(16);
+  const envelope = createSignedEnvelope({
+    sensorId: pair.publicKey,
+    timestamp,
+    nonce,
+    message: messageBytes,
+  });
+  const signature = ed25519Sign(buildEnvelopeSigningBytes(envelope), pair);
+  envelope.signature = signature;
+  return {
+    envelopeBytes: toSignedEnvelopeBytes(envelope),
+    sensorAddress: encodeAddress(pair.publicKey, 32),
+    timestamp,
+    nonce,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -197,7 +332,10 @@ Environment variable equivalents:
   SENSOR_FAKE_INTERVAL_MS`);
 }
 
-export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): Promise<number> {
+export async function runFakeSensorCli(
+  args: string[],
+  env: NodeJS.ProcessEnv
+): Promise<number> {
   if (args.includes('--help')) {
     printUsage();
     return 0;
@@ -213,14 +351,10 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
   }
 
   for (let i = 0; i < options.count; i += 1) {
-    const unsignedPayload = createFakePayload(options.sensorId);
-    const payload = {
-      ...unsignedPayload,
-      signature: signPayload(unsignedPayload, options.signerSeedHex)
-    };
+    const payload = createFakeEnvelopePayload(options.signerSeedHex);
     const headers: Record<string, string> = {
-      'content-type': 'application/json; charset=utf-8',
-      'x-request-id': randomUUID()
+      'content-type': 'application/protobuf',
+      'x-request-id': randomUUID(),
     };
 
     if (options.sensorZone) {
@@ -230,21 +364,26 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
     logInfo('sending telemetry payload', {
       iteration: i + 1,
       total: options.count,
-      payload
+      sensor_id: payload.sensorAddress,
+      timestamp: Number(payload.timestamp),
+      nonce_hex: Buffer.from(payload.nonce).toString('hex'),
     });
 
     try {
       const response = await fetch(options.endpointUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload)
+        body: Buffer.from(payload.envelopeBytes),
       });
       if (response.ok) {
-        logInfo('response received', { status: response.status, statusText: response.statusText });
+        logInfo('response received', {
+          status: response.status,
+          statusText: response.statusText,
+        });
       } else {
         logWarn('response received with non-ok status', {
           status: response.status,
-          statusText: response.statusText
+          statusText: response.statusText,
         });
       }
       if (!response.ok) {

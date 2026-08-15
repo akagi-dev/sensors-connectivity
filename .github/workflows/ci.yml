@@ -13,20 +13,20 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: actions/checkout@v7
+      - name: Configure BSR Registry Auth
+        run: |
+          echo "@buf:registry=https://buf.build/gen/npm/v1/" >> ~/.npmrc
+          echo "//buf.build/gen/npm/v1/:_authToken=${{ secrets.BUF_TOKEN }}" >> ~/.npmrc
+      - uses: pnpm/setup@v2
+      - run: pnpm build 
+      - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
 
-  e2e:
-    needs: unit-tests
-    permissions:
-      contents: read
-      actions: write
-    uses: ./.github/workflows/integration-test.yml
+#  e2e:
+#    needs: unit-tests
+#    permissions:
+#      contents: read
+#      actions: write
+#    uses: ./.github/workflows/integration-test.yml

@@ -29,12 +29,12 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
 
   async connect(): Promise<void> {
     logInfo('connecting to substrate finalized event source', {
-      substrateWsUrl: this.substrateWsUrl
+      substrateWsUrl: this.substrateWsUrl,
     });
     this.api = await ApiPromise.create({ provider: this.provider });
     await this.api.isReady;
     logInfo('connected to substrate finalized event source', {
-      substrateWsUrl: this.substrateWsUrl
+      substrateWsUrl: this.substrateWsUrl,
     });
   }
 
@@ -51,7 +51,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
       .getFinalizedHead()
       .then((hash) => api.rpc.chain.getHeader(hash));
     logDebug('fetched latest finalized height', {
-      height: header.number.toNumber()
+      height: header.number.toNumber(),
     });
     return header.number.toNumber();
   }
@@ -64,24 +64,35 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
     const api = this.requireApi();
 
     const latestFinalizedHash = await api.rpc.chain.getFinalizedHead();
-    const latestFinalizedHeader = await api.rpc.chain.getHeader(latestFinalizedHash);
+    const latestFinalizedHeader =
+      await api.rpc.chain.getHeader(latestFinalizedHash);
     const latestFinalizedHeight = latestFinalizedHeader.number.toNumber();
     logInfo('starting finalized head backfill', {
       fromInclusiveHeight,
-      latestFinalizedHeight
+      latestFinalizedHeight,
     });
 
-    for (let height = fromInclusiveHeight; height <= latestFinalizedHeight; height += 1) {
-      if (height === fromInclusiveHeight || height === latestFinalizedHeight || height % 100 === 0) {
+    for (
+      let height = fromInclusiveHeight;
+      height <= latestFinalizedHeight;
+      height += 1
+    ) {
+      if (
+        height === fromInclusiveHeight ||
+        height === latestFinalizedHeight ||
+        height % 100 === 0
+      ) {
         logDebug('processing backfill finalized block', {
           height,
-          latestFinalizedHeight
+          latestFinalizedHeight,
         });
       }
       const hash = await api.rpc.chain.getBlockHash(height);
       const eventsQuery = api.query.system?.events;
       if (!eventsQuery) {
-        logWarn('system.events query unavailable while backfilling', { height });
+        logWarn('system.events query unavailable while backfilling', {
+          height,
+        });
         continue;
       }
 
@@ -89,7 +100,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
       const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
       logDebug('normalized registry events from backfill block', {
         height,
-        eventCount: normalized.length
+        eventCount: normalized.length,
       });
       for (const event of normalized) {
         await onEvent(event);
@@ -97,47 +108,54 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
       await onFinalizedHead?.(height);
     }
 
-    this.unsubscribe = await api.rpc.chain.subscribeFinalizedHeads((header: HeaderLike) => {
-      this.processing = this.processing
-        .then(async () => {
-          const height = header.number.toNumber();
-          logDebug('received finalized head', {
-            height,
-            fromInclusiveHeight
-          });
-          if (height < fromInclusiveHeight) {
-            logDebug('skipping finalized head below start height', {
+    this.unsubscribe = await api.rpc.chain.subscribeFinalizedHeads(
+      (header: HeaderLike) => {
+        this.processing = this.processing
+          .then(async () => {
+            const height = header.number.toNumber();
+            logDebug('received finalized head', {
               height,
-              fromInclusiveHeight
+              fromInclusiveHeight,
             });
-            return;
-          }
+            if (height < fromInclusiveHeight) {
+              logDebug('skipping finalized head below start height', {
+                height,
+                fromInclusiveHeight,
+              });
+              return;
+            }
 
-          const eventsQuery = api.query.system?.events;
-          if (!eventsQuery) {
-            logWarn('system.events query unavailable on finalized head', { height });
-            return;
-          }
+            const eventsQuery = api.query.system?.events;
+            if (!eventsQuery) {
+              logWarn('system.events query unavailable on finalized head', {
+                height,
+              });
+              return;
+            }
 
-          const codec = await eventsQuery.at(header.hash as never);
-          const normalized = normalizeRegistryEvents(toEventRecords(codec), height);
-          logDebug('normalized registry events from finalized head', {
-            height,
-            eventCount: normalized.length
+            const codec = await eventsQuery.at(header.hash as never);
+            const normalized = normalizeRegistryEvents(
+              toEventRecords(codec),
+              height
+            );
+            logDebug('normalized registry events from finalized head', {
+              height,
+              eventCount: normalized.length,
+            });
+            for (const event of normalized) {
+              await onEvent(event);
+            }
+            await onFinalizedHead?.(height);
+          })
+          .catch((error) => {
+            logError('failed to process finalized head', error, {
+              fromInclusiveHeight,
+            });
           });
-          for (const event of normalized) {
-            await onEvent(event);
-          }
-          await onFinalizedHead?.(height);
-        })
-        .catch((error) => {
-          logError('failed to process finalized head', error, {
-            fromInclusiveHeight
-          });
-        });
-    });
+      }
+    );
     logInfo('subscribed to finalized heads', {
-      fromInclusiveHeight
+      fromInclusiveHeight,
     });
   }
 
@@ -186,7 +204,7 @@ export function normalizeRegistryEvents(
         eventIndex,
         section,
         method,
-        rawData
+        rawData,
       });
       return;
     }
@@ -202,7 +220,7 @@ export function normalizeRegistryEvents(
         eventIndex: normalizedIndex,
         section,
         method,
-        rawData
+        rawData,
       };
 
       if (entry.sensorId) {
@@ -257,12 +275,17 @@ function looksLikeRegistryEvent(name: string): boolean {
   const referencesSensor = name.includes('sensor') || name.includes('device');
   const referencesKey = name.includes('key');
   const referencesAuth =
-    name.includes('auth') || name.includes('enable') || name.includes('disable');
+    name.includes('auth') ||
+    name.includes('enable') ||
+    name.includes('disable');
 
   return (referencesSensor || referencesKey) && referencesAuth;
 }
 
-function safeToJson(data: { toJSON?: () => unknown; toHuman?: () => unknown }): unknown {
+function safeToJson(data: {
+  toJSON?: () => unknown;
+  toHuman?: () => unknown;
+}): unknown {
   try {
     if (typeof data.toJSON === 'function') {
       return data.toJSON();
@@ -285,7 +308,7 @@ function extractRegistryEntries(
     const addresses = extractDeviceAddresses(raw);
     return addresses.map((address) => ({
       sensorId: address,
-      enabled: true
+      enabled: true,
     }));
   }
 
@@ -337,8 +360,13 @@ function extractRegistryFields(raw: unknown): {
   enabled?: boolean;
 } {
   const sensorId =
-    findStringByKey(raw, ['sensorId', 'sensor_id', 'sensor', 'device', 'account']) ??
-    findStringByPosition(raw, 0);
+    findStringByKey(raw, [
+      'sensorId',
+      'sensor_id',
+      'sensor',
+      'device',
+      'account',
+    ]) ?? findStringByPosition(raw, 0);
   const enabled = inferEnabled(raw);
 
   const result: { sensorId?: string; enabled?: boolean } = {};
@@ -351,7 +379,10 @@ function extractRegistryFields(raw: unknown): {
   return result;
 }
 
-function findStringByKey(value: unknown, keys: readonly string[]): string | undefined {
+function findStringByKey(
+  value: unknown,
+  keys: readonly string[]
+): string | undefined {
   if (!value || typeof value !== 'object') {
     return undefined;
   }
@@ -384,13 +415,18 @@ function findStringByKey(value: unknown, keys: readonly string[]): string | unde
   return undefined;
 }
 
-function findStringByPosition(value: unknown, position: number): string | undefined {
+function findStringByPosition(
+  value: unknown,
+  position: number
+): string | undefined {
   if (!Array.isArray(value)) {
     return undefined;
   }
 
   const candidate = value[position];
-  return typeof candidate === 'string' && candidate.trim() ? candidate : undefined;
+  return typeof candidate === 'string' && candidate.trim()
+    ? candidate
+    : undefined;
 }
 
 function inferEnabled(value: unknown): boolean | undefined {
@@ -399,7 +435,8 @@ function inferEnabled(value: unknown): boolean | undefined {
   }
 
   const objectValue = value as Record<string, unknown>;
-  const enabledValue = objectValue.enabled ?? objectValue.isEnabled ?? objectValue.active;
+  const enabledValue =
+    objectValue.enabled ?? objectValue.isEnabled ?? objectValue.active;
 
   if (typeof enabledValue === 'boolean') {
     return enabledValue;

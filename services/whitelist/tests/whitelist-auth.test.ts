@@ -28,9 +28,9 @@ describe('WhitelistAuth', () => {
     const auth = new WhitelistAuth(['sensor-1']);
 
     expect(await auth.isNonceSeen('sensor-1', 'nonce-1')).toBe(false);
-    
+
     await auth.rememberNonce('sensor-1', 'nonce-1');
-    
+
     expect(await auth.isNonceSeen('sensor-1', 'nonce-1')).toBe(true);
   });
 
@@ -38,7 +38,7 @@ describe('WhitelistAuth', () => {
     const auth = new WhitelistAuth(['sensor-1', 'sensor-2']);
 
     await auth.rememberNonce('sensor-1', 'nonce-1');
-    
+
     expect(await auth.isNonceSeen('sensor-1', 'nonce-1')).toBe(true);
     expect(await auth.isNonceSeen('sensor-2', 'nonce-1')).toBe(false);
   });

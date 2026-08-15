@@ -1,60 +1,87 @@
 import { z } from 'zod';
-import { envelopeSchema } from './envelope.js';
-import { payloadSchemasByEventType, type EventTypeWithSchema } from './events.js';
+import { envelopeSchema, type Envelope } from './envelope.js';
+import {
+  payloadSchemasByEventType,
+  type EventTypeWithSchema,
+} from './events.js';
 
-export function parseEnvelope(input: unknown) {
+export function parseEnvelope(input: unknown): Envelope {
   return envelopeSchema.parse(input);
 }
 
-export function validateEnvelope(input: unknown) {
+export function validateEnvelope(
+  input: unknown
+): z.SafeParseReturnType<unknown, Envelope> {
   return envelopeSchema.safeParse(input);
 }
 
 export function parsePayloadForEventType<T extends EventTypeWithSchema>(
   eventType: T,
   payload: unknown
-) {
-  return payloadSchemasByEventType[eventType].parse(payload);
+): z.infer<(typeof payloadSchemasByEventType)[T]> {
+  const schema = payloadSchemasByEventType[eventType];
+  if (!schema) {
+    throw new Error(`Unknown event type: ${eventType}`);
+  }
+  return schema.parse(payload);
 }
 
 export function validatePayloadForEventType<T extends EventTypeWithSchema>(
   eventType: T,
   payload: unknown
-) {
-  return payloadSchemasByEventType[eventType].safeParse(payload);
+): z.SafeParseReturnType<
+  unknown,
+  z.infer<(typeof payloadSchemasByEventType)[T]>
+> {
+  const schema = payloadSchemasByEventType[eventType];
+  if (!schema) {
+    throw new Error(`Unknown event type: ${eventType}`);
+  }
+  return schema.safeParse(payload);
 }
 
-export function parseEnvelopeWithKnownPayload(input: unknown) {
+export function parseEnvelopeWithKnownPayload(input: unknown): Envelope & {
+  payload: z.infer<(typeof payloadSchemasByEventType)[EventTypeWithSchema]>;
+} {
   const envelope = parseEnvelope(input);
-  const schema = payloadSchemasByEventType[
-    envelope.event_type as EventTypeWithSchema
-  ];
+  const schema =
+    payloadSchemasByEventType[envelope.event_type as EventTypeWithSchema];
 
   if (!schema) {
     throw new z.ZodError([
       {
         code: z.ZodIssueCode.custom,
         path: ['event_type'],
-        message: `Unknown event_type: ${envelope.event_type}`
-      }
+        message: `Unknown event_type: ${envelope.event_type}`,
+      },
     ]);
   }
 
   return {
     ...envelope,
-    payload: schema.parse(envelope.payload)
+    payload: schema.parse(envelope.payload),
   };
 }
 
-export function validateEnvelopeWithKnownPayload(input: unknown) {
+export function validateEnvelopeWithKnownPayload(input: unknown):
+  | {
+      success: true;
+      data: Envelope & {
+        payload: z.infer<
+          (typeof payloadSchemasByEventType)[EventTypeWithSchema]
+        >;
+      };
+    }
+  | { success: false; error: z.ZodError } {
   const envelopeResult = validateEnvelope(input);
   if (!envelopeResult.success) {
     return envelopeResult;
   }
 
-  const schema = payloadSchemasByEventType[
-    envelopeResult.data.event_type as EventTypeWithSchema
-  ];
+  const schema =
+    payloadSchemasByEventType[
+      envelopeResult.data.event_type as EventTypeWithSchema
+    ];
 
   if (!schema) {
     return {
@@ -63,9 +90,9 @@ export function validateEnvelopeWithKnownPayload(input: unknown) {
         {
           code: z.ZodIssueCode.custom,
           path: ['event_type'],
-          message: `Unknown event_type: ${envelopeResult.data.event_type}`
-        }
-      ])
+          message: `Unknown event_type: ${envelopeResult.data.event_type}`,
+        },
+      ]),
     };
   }
 
@@ -78,7 +105,7 @@ export function validateEnvelopeWithKnownPayload(input: unknown) {
     success: true as const,
     data: {
       ...envelopeResult.data,
-      payload: payloadResult.data
-    }
+      payload: payloadResult.data,
+    },
   };
 }
