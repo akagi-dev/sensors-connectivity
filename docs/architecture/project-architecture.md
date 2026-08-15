@@ -6,9 +6,9 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 
 ## High-level architecture
 
-`Sensor -> Authorizer -> Message Bus (Kafka) -> Services (IPFS, PubSub, Blochain)`
+`Sensor -> Endpoint -> Message Bus (Kafka) -> Services (IPFS, PubSub, Blockchain)`
 
-> Authorization source: `Robonomics Blockchain -> Registry Sync -> Redis -> Authorizer`
+> Authorization source: `Robonomics Blockchain -> Registry Sync -> Redis -> Endpoint` or `Whitelist -> Redis -> Endpoint`
 
 ### PubSub Broadcast
 
@@ -27,20 +27,27 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 ### Sensor
 - Out of scope for this project phase (designed and implemented by third party).
 - Sends telemetry via `POST /v1/telemetry`.
-- Includes signature and anti-replay fields.
+- Wire format: protobuf `crypto.v1.SignedEnvelope` (`Content-Type: application/protobuf`).
+- Includes Ed25519 signature over `sensor_id || timestamp_le || nonce || message` and anti-replay fields.
 - Retries same payload safely when delivery fails.
 
-### Authorizer
-- Validates request schema and limits.
-- Verifies hash, timestamp window, nonce, and Ed25519 signature.
-- Checks sensor/key status from local registry projection (no blockchain RPC in hot path).
-- Publishes authorized events to Kafka.
+### Endpoint
+- Validates protobuf `crypto.v1.SignedEnvelope` schema and field constraints.
+- Verifies Ed25519 signature over raw envelope bytes.
+- Enforces timestamp window policy and replay protection via nonce deduplication.
+- Checks sensor/key status from Redis projection using pluggable authentication (registry-sync or whitelist).
+- Publishes authorized events to `telemetry.authorized.v1` and rejected events to `telemetry.rejected.v1`.
 - Returns `202` only after Kafka ACK.
 
 ### Registry Sync
 - Consumes finalized Robonomics blockchain events.
-- Maintains local projection of sensor/key status.
-- Serves low-latency reads to Authorizer module (optionally via Redis cache).
+- Maintains local Redis projection of sensor/key status.
+- Serves low-latency reads to Endpoint module (no blockchain RPC in hot path).
+
+### Whitelist
+- Alternative authentication provider for simplified deployments.
+- Maintains static sensor whitelist in Redis.
+- Bypasses blockchain dependency while preserving same authentication contract.
 
 ### Kafka (central bus)
 - Durable event log and decoupling point for all processing modules.
@@ -52,10 +59,11 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 - Commits offset only after publish confirmation policy.
 
 ### Heartbeat Tracker
-- Read-only observability consumer of trusted `telemetry.authorized.v1` events from Kafka.
-- Uses `fromBeginning: false` and tracks `firstSeen`, `lastSeen`, and `onlineSince` per sensor.
-- Exposes online-sensor counts and per-sensor/aggregate uptime metrics over a configurable online window (default 30s).
+- Observability-only consumer of trusted `telemetry.authorized.v1` events from Kafka.
+- Uses `fromBeginning: false` and tracks `firstSeen`, `lastSeen`, and `onlineSince` per sensor in Redis.
+- Exposes Prometheus metrics: `sensors_online` count, per-sensor uptime percentage, and aggregate uptime over a configurable online window (default 30s).
 - Does not emit result events and does not participate in retry/DLQ commit-result semantics.
+- Fault isolation: failures in heartbeat tracking do not block telemetry pipeline.
 
 ### IPFS Publisher
 - Consumes authorized events from Kafka.
@@ -102,10 +110,11 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 - Keep retries/DLQ isolated per module to prevent cross-module blocking.
 
 ## Explicit architectural constraints
-- No synchronous dependency between processing modules.
-- Allowed flow: `Authorizer -> Kafka -> Consumers`.
+- No synchronous dependency between processing modules (all flow through Kafka).
+- Allowed flow: `Endpoint -> Kafka -> Consumers`.
 - Disallowed direct couplings:
-  - Authorizer -> PubSub
-  - Authorizer -> IPFS
+  - Endpoint -> PubSub
+  - Endpoint -> IPFS
   - PubSub -> IPFS
   - IPFS -> Blockchain (must flow through Kafka)
+- Authentication is pluggable via `SensorAuth` interface but must use Redis for low-latency lookups.
