@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import type { SensorAuth } from '@scp/contracts';
 import { loadRegistrySyncConfig } from './config.js';
 import { createRedisKeyspace } from './keyspace.js';
 import { RedisProjectionStore, type RedisLike } from './projection-store.js';
@@ -8,7 +9,7 @@ export interface SensorRegistryRecord {
   enabled: boolean;
 }
 
-export interface RegistryReader {
+export interface RegistryReader extends SensorAuth {
   getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null>;
   isNonceSeen(sensorId: string, nonce: string): Promise<boolean>;
   rememberNonce(sensorId: string, nonce: string): Promise<void>;
@@ -22,6 +23,11 @@ export class InMemoryRegistryReader implements RegistryReader {
     seed.forEach((record) => {
       this.sensors.set(record.sensorId, record);
     });
+  }
+
+  async authenticate(sensorId: string): Promise<boolean> {
+    const record = await this.getSensorRecord(sensorId);
+    return record !== null && record.enabled;
   }
 
   async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
@@ -46,6 +52,11 @@ export class RedisRegistryReader implements RegistryReader {
     private readonly nonceTtlSeconds: number
   ) {
     this.projectionStore = new RedisProjectionStore(redis, createRedisKeyspace(redisKeyPrefix));
+  }
+
+  async authenticate(sensorId: string): Promise<boolean> {
+    const record = await this.getSensorRecord(sensorId);
+    return record !== null && record.enabled;
   }
 
   async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
