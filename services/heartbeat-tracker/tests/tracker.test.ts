@@ -21,7 +21,7 @@ function authorizedEnvelope(sensorId: string) {
     event_type: TELEMETRY_TOPICS.AUTHORIZED,
     event_version: 'v1',
     occurred_at: '2026-01-01T00:00:00Z',
-    source: 'authorizer',
+    source: 'endpoint',
     payload: {
       sensor_id: sensorId,
       timestamp: '2026-01-01T00:00:00Z',
@@ -180,7 +180,7 @@ describe('heartbeat tracker state', () => {
         event_type: TELEMETRY_TOPICS.REJECTED,
         event_version: 'v1',
         occurred_at: '2026-01-01T00:00:00Z',
-        source: 'authorizer',
+        source: 'endpoint',
         payload: {
           reason_code: 'forbidden'
         }

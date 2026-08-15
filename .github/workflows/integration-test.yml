@@ -16,11 +16,11 @@ jobs:
       REDIS_URL: redis://localhost:6379
       IPFS_API_URL: http://127.0.0.1:5001
       SUBSTRATE_WS_URL: ws://127.0.0.1:9944
-      AUTHORIZER_PORT: "3000"
-      AUTHORIZER_SOURCE: authorizer
-      AUTHORIZER_TIMESTAMP_SKEW_SECONDS: "300"
-      AUTHORIZER_PRODUCER_MAX_ATTEMPTS: "3"
-      AUTHORIZER_PRODUCER_RETRY_BACKOFF_MS: "100"
+      ENDPOINT_PORT: "3000"
+      ENDPOINT_SOURCE: endpoint
+      ENDPOINT_TIMESTAMP_SKEW_SECONDS: "300"
+      ENDPOINT_PRODUCER_MAX_ATTEMPTS: "3"
+      ENDPOINT_PRODUCER_RETRY_BACKOFF_MS: "100"
       REGISTRY_REDIS_PREFIX: registry-sync:v1
       REGISTRY_SYNC_HEALTH_PORT: "3011"
       REGISTRY_SYNC_MAX_RETRIES: "3"
@@ -106,7 +106,7 @@ jobs:
           set -euo pipefail
           mkdir -p logs
 
-          SENSOR_ID="$(pnpm --filter @scp/authorizer exec node --input-type=module <<'NODE'
+          SENSOR_ID="$(pnpm --filter @scp/endpoint exec node --input-type=module <<'NODE'
           import { cryptoWaitReady, ed25519PairFromSeed, encodeAddress } from '@polkadot/util-crypto';
           await cryptoWaitReady();
           const seedHex = (process.env.SENSOR_SIGNER_SEED_HEX ?? '').replace(/^0x/, '');
@@ -127,7 +127,7 @@ jobs:
           echo "PUBSUB_RESERVED_PEERS=${PUBSUB_RESERVED_PEERS}" | tee -a "$GITHUB_ENV"
 
           (pnpm --filter @scp/registry-sync dev > logs/registry-sync.log 2>&1 & echo $! > logs/registry-sync.pid)
-          (pnpm --filter @scp/authorizer dev > logs/authorizer.log 2>&1 & echo $! > logs/authorizer.pid)
+          (pnpm --filter @scp/endpoint dev > logs/endpoint.log 2>&1 & echo $! > logs/endpoint.pid)
           (PUBSUB_RESERVED_PEERS="${PUBSUB_RESERVED_PEERS}" pnpm --filter @scp/pubsub-broadcaster dev > logs/pubsub-broadcaster.log 2>&1 & echo $! > logs/pubsub-broadcaster.pid)
           (pnpm --filter @scp/ipfs-publisher dev > logs/ipfs-publisher.log 2>&1 & echo $! > logs/ipfs-publisher.pid)
           (pnpm --filter @scp/blockchain-anchor dev > logs/blockchain-anchor.log 2>&1 & echo $! > logs/blockchain-anchor.pid)
@@ -152,7 +152,7 @@ jobs:
             echo "${name} is healthy: ${url}"
           }
 
-          wait_for_http "Authorizer" "http://127.0.0.1:${AUTHORIZER_PORT}/health" "120"
+          wait_for_http "Authorizer" "http://127.0.0.1:${ENDPOINT_PORT}/health" "120"
           wait_for_http "Registry Sync" "http://127.0.0.1:${REGISTRY_SYNC_HEALTH_PORT}/health" "180"
           wait_for_http "Pubsub Broadcaster" "http://127.0.0.1:${PUBSUB_BROADCASTER_HEALTH_PORT}/health" "180"
 
@@ -172,7 +172,7 @@ jobs:
           trap 'kill "$collector_pid" 2>/dev/null || true' EXIT
 
           if ! pnpm fake-sensor -- \
-            --endpoint "http://127.0.0.1:${AUTHORIZER_PORT}/v1/telemetry" \
+            --endpoint "http://127.0.0.1:${ENDPOINT_PORT}/v1/telemetry" \
             --count "${SENSOR_MESSAGE_COUNT}" \
             --interval-ms "${SENSOR_INTERVAL_MS}" \
             --signer-seed-hex "${SENSOR_SIGNER_SEED_HEX}" \
@@ -213,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! grep -q 'telemetry accepted' logs/authorizer.log; then
+          if ! grep -q 'telemetry accepted' logs/endpoint.log; then
             echo 'Authorizer log does not show accepted telemetry' >&2
             exit 1
           fi
@@ -229,7 +229,7 @@ jobs:
           fi
 
           if grep -Eqi '(^|[^a-z])(error|exception|unhandledrejection|econnrefused|failed to start|failed to publish)([^a-z]|$)' \
-            logs/authorizer.log logs/registry-sync.log logs/pubsub-broadcaster.log logs/ipfs-publisher.log logs/blockchain-anchor.log; then
+            logs/endpoint.log logs/registry-sync.log logs/pubsub-broadcaster.log logs/ipfs-publisher.log logs/blockchain-anchor.log; then
             echo 'Detected error markers in service logs' >&2
             exit 1
           fi

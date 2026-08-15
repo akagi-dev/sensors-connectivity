@@ -5,7 +5,7 @@ TypeScript monorepo scaffold for the telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00 through WP-03 are implemented (`contracts`, `registry-sync`, `authorizer`, `pubsub-broadcaster`). WP-04 and WP-05 remain scaffolded.
+> Current phase: WP-00 through WP-03 are implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`). WP-04 and WP-05 remain scaffolded.
 
 ## Stack
 
@@ -44,8 +44,9 @@ pnpm dev
 
 ```text
 packages/contracts         # @scp/contracts shared schemas/types/helpers
-services/authorizer        # POST /v1/telemetry ingress stub
+services/endpoint          # POST /v1/telemetry ingress (formerly authorizer)
 services/registry-sync     # substrate->redis projection sync service
+services/whitelist         # whitelist-based sensor authentication
 services/pubsub-broadcaster
 services/heartbeat-tracker  # online-sensor liveness & uptime metrics from trusted events
 services/ipfs-publisher
@@ -56,8 +57,9 @@ tools/fake-sensor-cli      # fake telemetry sender for debug/tests
 ## Per-service development
 
 ```bash
-pnpm --filter @scp/authorizer dev
+pnpm --filter @scp/endpoint dev
 pnpm --filter @scp/registry-sync dev
+pnpm --filter @scp/whitelist dev
 pnpm --filter @scp/pubsub-broadcaster dev
 pnpm --filter @scp/heartbeat-tracker dev
 pnpm --filter @scp/ipfs-publisher dev
@@ -94,11 +96,11 @@ Available options:
 - `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
 - `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
 
-The CLI now sends authorizer-compatible payloads (`sensor_id`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+The CLI now sends endpoint-compatible payloads (`sensor_id`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
 
 ## Service overview
 
-- **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
+- **endpoint**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
 - **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
 - **pubsub-broadcaster**: consumes `telemetry.authorized.v1`, validates contracts, publishes to GossipSub (with optional reserved peers), emits `telemetry.pubsub.result.v1`, and routes exhausted failures to DLQ.
 - **heartbeat-tracker**: consumes trusted `telemetry.authorized.v1`, stores per-sensor first/last seen plus continuous uptime streaks in Redis, and exposes `sensors_online` + uptime metrics over a configurable online window (default 30s).

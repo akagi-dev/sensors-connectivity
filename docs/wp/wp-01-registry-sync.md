@@ -20,7 +20,7 @@ Implement `registry-sync` so it continuously ingests finalized registry events a
 - Shared contracts/runtime from WP-00.
 
 ### Outputs
-- Redis projection used by `authorizer` for sensor/key status lookups.
+- Redis projection used by `endpoint` for sensor/key status lookups.
 - Operational telemetry/logging/metrics for sync lag, projection updates, and failures.
 
 ## Detailed tasks / Implementation checklist
