@@ -38,11 +38,11 @@ const authorizedMessage = JSON.stringify({
   occurred_at: '2026-01-01T00:00:00Z',
   source: 'endpoint',
   payload: {
-    sensor_id: 'sensor-int',
-    timestamp: '2026-01-01T00:00:00Z',
-    nonce: 'nonce-int',
-    measurements: { temp: 25 },
-    signature: '0xabc'
+    sensor_id: Buffer.alloc(32, 1).toString('base64'),
+    timestamp: Date.parse('2026-01-01T00:00:00Z'),
+    nonce: Buffer.alloc(16, 2).toString('base64'),
+    message: Buffer.from(JSON.stringify({ temp: 25 })).toString('base64'),
+    signature: Buffer.alloc(64, 3).toString('base64')
   }
 });
 

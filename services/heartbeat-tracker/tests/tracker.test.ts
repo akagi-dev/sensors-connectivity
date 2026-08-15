@@ -16,6 +16,7 @@ function createClock(start = Date.parse('2026-01-01T00:00:00Z')) {
 }
 
 function authorizedEnvelope(sensorId: string) {
+  const sensorBytes = Buffer.from(sensorId.padEnd(32, '_').slice(0, 32));
   return JSON.stringify({
     event_id: `evt-${sensorId}`,
     event_type: TELEMETRY_TOPICS.AUTHORIZED,
@@ -23,13 +24,17 @@ function authorizedEnvelope(sensorId: string) {
     occurred_at: '2026-01-01T00:00:00Z',
     source: 'endpoint',
     payload: {
-      sensor_id: sensorId,
-      timestamp: '2026-01-01T00:00:00Z',
-      nonce: `nonce-${sensorId}`,
-      measurements: { temp: 21 },
-      signature: '0xabc'
+      sensor_id: sensorBytes.toString('base64'),
+      timestamp: Date.parse('2026-01-01T00:00:00Z'),
+      nonce: Buffer.from(`nonce-${sensorId}`.padEnd(16, '_').slice(0, 16)).toString('base64'),
+      message: Buffer.from(JSON.stringify({ temp: 21 })).toString('base64'),
+      signature: Buffer.alloc(64, 3).toString('base64')
     }
   });
+}
+
+function encodeSensorId(sensorId: string): string {
+  return Buffer.from(sensorId.padEnd(32, '_').slice(0, 32)).toString('base64');
 }
 
 class FakeRedis {
@@ -118,10 +123,10 @@ describe('heartbeat tracker state', () => {
     expect(metrics.sensors_total_tracked).toBe(3);
     expect(metrics.sensors_online).toBe(2);
     expect(metrics.sensor_uptime_seconds).toMatchObject({
-      'sensor-b': 29,
-      'sensor-c': 0
+      [encodeSensorId('sensor-b')]: 29,
+      [encodeSensorId('sensor-c')]: 0
     });
-    expect(metrics.sensor_uptime_seconds['sensor-a']).toBeUndefined();
+    expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-a')]).toBeUndefined();
   });
 
   it('keeps onlineSince stable within window and resets after large gap', async () => {
@@ -136,13 +141,13 @@ describe('heartbeat tracker state', () => {
     clock.advance(5000);
 
     let metrics = await tracker.createMetrics(consumed.value);
-    expect(metrics.sensor_uptime_seconds['sensor-1']).toBe(15);
+    expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-1')]).toBe(15);
 
     clock.advance(35000);
     await handleTelemetryMessage(authorizedEnvelope('sensor-1'), tracker, consumed);
 
     metrics = await tracker.createMetrics(consumed.value);
-    expect(metrics.sensor_uptime_seconds['sensor-1']).toBe(0);
+    expect(metrics.sensor_uptime_seconds[encodeSensorId('sensor-1')]).toBe(0);
   });
 
   it('computes uptime aggregates and returns avg 0 when none are online', async () => {
@@ -222,6 +227,6 @@ describe('heartbeat tracker state', () => {
     expect(metrics.sensors_total_tracked).toBe(1);
     expect(metrics.sensors_online).toBe(1);
     expect(metrics.sensors_uptime.length).toBe(1);
-    expect(metrics.sensors_uptime.at(0)?.sensor_id).toBe('sensor-recent');
+    expect(metrics.sensors_uptime.at(0)?.sensor_id).toBe(encodeSensorId('sensor-recent'));
   });
 });

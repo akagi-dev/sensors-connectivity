@@ -49,9 +49,9 @@ export async function startIpfsPublisher(): Promise<void> {
     events: [
       {
         sensor_id: 'sensor-dev-1',
-        timestamp: new Date().toISOString(),
+        timestamp: Date.now(),
         nonce: 'nonce-dev',
-        measurements: { temp: 22 },
+        message: Buffer.from(JSON.stringify({ temp: 22 })).toString('base64'),
         signature: '0x00'
       }
     ]

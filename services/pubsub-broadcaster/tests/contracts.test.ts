@@ -10,11 +10,11 @@ describe('pubsub broadcaster contract compatibility', () => {
       occurred_at: '2026-01-01T00:00:00Z',
       source: 'endpoint',
       payload: {
-        sensor_id: 'sensor-1',
-        timestamp: '2026-01-01T00:00:00Z',
-        nonce: 'nonce-1',
-        measurements: { temp: 20 },
-        signature: '0xabc'
+        sensor_id: Buffer.alloc(32, 1).toString('base64'),
+        timestamp: Date.parse('2026-01-01T00:00:00Z'),
+        nonce: Buffer.alloc(16, 2).toString('base64'),
+        message: Buffer.from(JSON.stringify({ temp: 20 })).toString('base64'),
+        signature: Buffer.alloc(64, 3).toString('base64')
       }
     });
 
