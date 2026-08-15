@@ -1,4 +1,4 @@
-import { decodeAddress, ed25519Verify } from '@polkadot/util-crypto';
+import { cryptoWaitReady, decodeAddress, ed25519Verify } from '@polkadot/util-crypto';
 import { buildEnvelopeSigningBytes } from '@scp/contracts';
 
 export interface SignatureVerificationInput {
@@ -14,6 +14,7 @@ export async function verifyTelemetrySignature(
   input: SignatureVerificationInput
 ): Promise<boolean> {
   try {
+    await cryptoWaitReady();
     return ed25519Verify(
       buildEnvelopeSigningBytes(input),
       input.signature,
