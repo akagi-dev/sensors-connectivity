@@ -2,7 +2,6 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { fileURLToPath } from 'node:url';
-import pino from 'pino';
 import { z } from 'zod';
 import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-sync';
 import type { TelemetryRejectedPayload } from '@scp/contracts';
@@ -10,6 +9,7 @@ import { createEndpointEventProducer, type EndpointEventProducer } from './kafka
 import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
 import { createSensorAuthProvider, loadSensorAuthConfig } from './sensor-auth-factory.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 
 const telemetryRequestSchema = z
   .object({
@@ -33,36 +33,6 @@ const telemetryRequestJsonSchema = {
   },
   additionalProperties: true
 } as const;
-
-const logger = pino({
-  name: 'endpoint',
-  level: process.env.ENDPOINT_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
-});
-
-export function logInfo(message: string, context?: Record<string, unknown>): void {
-  logger.info(context ?? {}, message);
-}
-
-export function logDebug(message: string, context?: Record<string, unknown>): void {
-  logger.debug(context ?? {}, message);
-}
-
-export function logWarn(message: string, context?: Record<string, unknown>): void {
-  logger.warn(context ?? {}, message);
-}
-
-export function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
-  const normalizedError = error instanceof Error
-    ? { name: error.name, message: error.message, stack: error.stack }
-    : { message: String(error) };
-  logger.error(
-    {
-      ...(context ?? {}),
-      error: normalizedError
-    },
-    message
-  );
-}
 
 export interface EndpointDeps {
   registryReader: RegistryReader;

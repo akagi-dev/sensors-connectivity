@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logDebug } from '../src/index.js';
+import { logDebug } from '../src/logger.js';
 
 describe('endpoint logger helpers', () => {
   it('supports debug logs without throwing', () => {

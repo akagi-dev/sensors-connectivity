@@ -1,6 +1,6 @@
 import { type RegistryReader } from '@scp/registry-sync';
 import { WhitelistAuth, loadWhitelistConfig } from '@scp/whitelist';
-import { logInfo, logWarn } from './index.js';
+import { logInfo, logWarn } from './logger.js';
 
 /**
  * Sensor authentication strategy types.
