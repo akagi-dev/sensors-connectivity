@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
 import {
   buildEnvelopeSigningBytes,
+  concatBytes,
   createSignedEnvelope,
   toSignedEnvelopeBytes
 } from '@scp/contracts';
@@ -161,25 +162,61 @@ function parseSeedHex(seedHex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(normalizedSeed, 'hex'));
 }
 
+function encodeVarint(value: number): Uint8Array {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid varint value: ${value}`);
+  }
+  const chunks: number[] = [];
+  let remaining = value;
+  while (remaining >= 0x80) {
+    chunks.push((remaining & 0x7f) | 0x80);
+    remaining >>>= 7;
+  }
+  chunks.push(remaining);
+  return Uint8Array.from(chunks);
+}
+
+function encodeTag(fieldNumber: number, wireType: number): Uint8Array {
+  return encodeVarint((fieldNumber << 3) | wireType);
+}
+
+function encodeLengthDelimitedField(fieldNumber: number, value: Uint8Array): Uint8Array {
+  return concatBytes([encodeTag(fieldNumber, 2), encodeVarint(value.length), value]);
+}
+
+function encodeDoubleField(fieldNumber: number, value: number): Uint8Array {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setFloat64(0, value, true);
+  return concatBytes([encodeTag(fieldNumber, 1), bytes]);
+}
+
+function createBme280TemperatureSensor(temperatureCelsius: number): Uint8Array {
+  const measurement = encodeLengthDelimitedField(1, encodeDoubleField(1, temperatureCelsius));
+  return encodeLengthDelimitedField(2, measurement);
+}
+
+function createBme280HumiditySensor(humidityPercent: number): Uint8Array {
+  const measurement = encodeLengthDelimitedField(2, encodeDoubleField(1, humidityPercent));
+  return encodeLengthDelimitedField(2, measurement);
+}
+
+function createCoreMessageBytes(ownerPublicKey: Uint8Array, temperatureCelsius: number, humidityPercent: number): Uint8Array {
+  const metadata = encodeLengthDelimitedField(1, encodeLengthDelimitedField(1, ownerPublicKey));
+  const urban = encodeLengthDelimitedField(
+    2,
+    concatBytes([
+      encodeLengthDelimitedField(1, createBme280TemperatureSensor(temperatureCelsius)),
+      encodeLengthDelimitedField(1, createBme280HumiditySensor(humidityPercent))
+    ])
+  );
+  return concatBytes([metadata, urban]);
+}
+
 export function createFakeEnvelopePayload(signerSeedHex: string): FakeEnvelopePayload {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
   const temperature = Number((18 + Math.random() * 8).toFixed(2));
   const humidity = Number((30 + Math.random() * 40).toFixed(2));
-  const messageBytes = Uint8Array.from(
-    Buffer.from(
-      JSON.stringify({
-        owner: Buffer.from(pair.publicKey).toString('base64'),
-        payload: {
-          urban: {
-            public: [
-              { sensor: { bme280: { measurement: { temperature: { celsius: temperature } } } } },
-              { sensor: { bme280: { measurement: { humidity: { percent: humidity } } } } }
-            ]
-          }
-        }
-      })
-    )
-  );
+  const messageBytes = createCoreMessageBytes(pair.publicKey, temperature, humidity);
   const timestamp = BigInt(Date.now());
   const nonce = randomBytes(16);
   const envelope = createSignedEnvelope({
