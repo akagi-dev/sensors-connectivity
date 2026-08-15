@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./services/blockchain-anchor" },
+    { "path": "./services/endpoint" },
+    { "path": "./services/heartbeat-tracker" },
+    { "path": "./services/ipfs-publisher" },
+    { "path": "./services/pubsub-broadcaster" },
+    { "path": "./services/registry-sync" },
+    { "path": "./services/whitelist" }
+  ]
+}
