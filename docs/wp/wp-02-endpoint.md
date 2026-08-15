@@ -1,4 +1,4 @@
-# WP-02 — `authorizer`
+# WP-02 — `endpoint`
 
 ## Summary
 WP-02 implements trusted telemetry ingress at `POST /v1/telemetry`. The service validates protobuf `SignedEnvelope` payloads, verifies Ed25519 signatures over raw envelope bytes (`sensor_id || timestamp_le || nonce || message`), and authorizes sensors against the Redis projection. Authorized events are published to Kafka, and `202` is returned only after broker acknowledgment.
@@ -81,7 +81,7 @@ Deliver a working Authorizer ingress path that:
   - envelope/payload compatibility with WP-00 schemas for both produced topics.
 
 ## Definition of Done
-- All `TODO` markers in `authorizer` are replaced with real logic.
+- All `TODO` markers in `endpoint` are replaced with real logic.
 - Unit tests + integration test against local `docker-compose` infra are green.
 - `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test` are green.
 - Bounded retry + DLQ behavior is wired via shared runtime where applicable.

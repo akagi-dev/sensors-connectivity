@@ -1,5 +1,5 @@
 {
-  "name": "@scp/authorizer",
+  "name": "@scp/endpoint",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,7 @@
     "@polkadot/util-crypto": "^13.5.9",
     "@scp/contracts": "workspace:*",
     "@scp/registry-sync": "workspace:*",
+    "@scp/whitelist": "workspace:*",
     "fastify": "^4.29.1",
     "kafkajs": "^2.2.4",
     "pino": "^9.14.0",

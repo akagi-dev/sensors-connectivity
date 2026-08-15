@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
 import { createSignedEnvelope, toSignedEnvelopeBytes, buildEnvelopeSigningBytes } from '@scp/contracts';
-import { createAuthorizerApp } from '../src/index.js';
+import { createEndpointApp } from '../src/index.js';
 import { InMemoryRegistryReader } from '../../registry-sync/src/reader.js';
 
 async function buildSignedEnvelopeBytes(seedByte: number, timestamp: bigint = BigInt(Date.now())) {
@@ -21,10 +21,10 @@ async function buildSignedEnvelopeBytes(seedByte: number, timestamp: bigint = Bi
   };
 }
 
-describe('authorizer smoke', () => {
-  it('returns 403 for unknown sensor and emits rejected event', async () => {
+describe('endpoint smoke', () => {
+  it('returns 403 for unknown sensor, emits rejected event, and exposes health/metrics counters', async () => {
     const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
-    const app = createAuthorizerApp({
+    const app = createEndpointApp({
       registryReader: new InMemoryRegistryReader([]),
       producer: {
         async publishAuthorized() {
@@ -53,7 +53,7 @@ describe('authorizer smoke', () => {
 
   it('returns 401 for stale timestamps', async () => {
     const rejectedEvents: Array<{ reason_code: string; sensor_id?: string | undefined }> = [];
-    const app = createAuthorizerApp(
+    const app = createEndpointApp(
       {
         registryReader: new InMemoryRegistryReader([]),
         producer: {
@@ -87,7 +87,7 @@ describe('authorizer smoke', () => {
   it('accepts valid envelope for enabled sensor', async () => {
     const envelope = await buildSignedEnvelopeBytes(2);
     const authorized: unknown[] = [];
-    const app = createAuthorizerApp({
+    const app = createEndpointApp({
       registryReader: new InMemoryRegistryReader([
         { sensorId: envelope.sensorId, enabled: true }
       ]),

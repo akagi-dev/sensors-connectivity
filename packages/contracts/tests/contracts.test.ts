@@ -27,7 +27,7 @@ describe('contracts', () => {
       event_type: 'telemetry.authorized.v1',
       event_version: 'v1',
       occurred_at: '2026-01-01T00:00:00Z',
-      source: 'authorizer',
+      source: 'endpoint',
       payload: {
         sensor_id: Buffer.alloc(32, 1).toString('base64'),
         timestamp: Date.now(),
@@ -81,7 +81,7 @@ describe('contracts', () => {
         event_type: 'telemetry.authorized.v1',
         event_version: 'v1',
         occurred_at: '2026-01-01T00:00:00Z',
-        source: 'authorizer',
+        source: 'endpoint',
         payload: {},
         extra_field: true
       })
@@ -94,7 +94,7 @@ describe('contracts', () => {
         event_type: 'telemetry.authorized.v1',
         event_version: 'v1',
         occurred_at: 'not-a-date',
-        source: 'authorizer',
+        source: 'endpoint',
         payload: {}
       })
     ).toThrow();
@@ -129,7 +129,7 @@ describe('contracts', () => {
       event_type: 'telemetry.authorized.v1',
       event_version: 'v1',
       occurred_at: '2026-01-01T00:00:00Z',
-      source: 'authorizer',
+      source: 'endpoint',
       payload: {
         sensor_id: Buffer.alloc(32, 1).toString('base64'),
         timestamp: Date.now(),
@@ -150,7 +150,7 @@ describe('contracts', () => {
       event_type: 'telemetry.unknown.v1',
       event_version: 'v1',
       occurred_at: '2026-01-01T00:00:00Z',
-      source: 'authorizer',
+      source: 'endpoint',
       payload: {}
     });
     expect(unknownTypeResult.success).toBe(false);
