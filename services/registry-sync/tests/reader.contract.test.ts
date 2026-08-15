@@ -3,7 +3,7 @@ import { createRedisKeyspace } from '../src/keyspace.js';
 import { RedisRegistryReader } from '../src/reader.js';
 import { FakeRedis } from './test-helpers.js';
 
-describe('authorizer read contract from redis projection', () => {
+describe('endpoint read contract from redis projection', () => {
   it('reads sensor status/public key and nonce state from projected schema', async () => {
     const redis = new FakeRedis();
     const keys = createRedisKeyspace('registry-sync:v1');

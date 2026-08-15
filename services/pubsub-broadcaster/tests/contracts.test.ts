@@ -8,7 +8,7 @@ describe('pubsub broadcaster contract compatibility', () => {
       event_type: TELEMETRY_TOPICS.AUTHORIZED,
       event_version: 'v1',
       occurred_at: '2026-01-01T00:00:00Z',
-      source: 'authorizer',
+      source: 'endpoint',
       payload: {
         sensor_id: 'sensor-1',
         timestamp: '2026-01-01T00:00:00Z',

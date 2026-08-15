@@ -2,13 +2,14 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { fileURLToPath } from 'node:url';
-import pino from 'pino';
 import { z } from 'zod';
 import { createRegistryReaderFromEnv, type RegistryReader } from '@scp/registry-sync';
 import type { TelemetryRejectedPayload } from '@scp/contracts';
-import { createAuthorizerEventProducer, type AuthorizerEventProducer } from './kafka-producer.js';
-import { loadAuthorizerConfig } from './config.js';
+import { createEndpointEventProducer, type EndpointEventProducer } from './kafka-producer.js';
+import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
+import { createSensorAuthProvider, loadSensorAuthConfig } from './sensor-auth-factory.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 
 const telemetryRequestSchema = z
   .object({
@@ -33,48 +34,18 @@ const telemetryRequestJsonSchema = {
   additionalProperties: true
 } as const;
 
-const logger = pino({
-  name: 'authorizer',
-  level: process.env.AUTHORIZER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
-});
-
-export function logInfo(message: string, context?: Record<string, unknown>): void {
-  logger.info(context ?? {}, message);
-}
-
-export function logDebug(message: string, context?: Record<string, unknown>): void {
-  logger.debug(context ?? {}, message);
-}
-
-export function logWarn(message: string, context?: Record<string, unknown>): void {
-  logger.warn(context ?? {}, message);
-}
-
-export function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
-  const normalizedError = error instanceof Error
-    ? { name: error.name, message: error.message, stack: error.stack }
-    : { message: String(error) };
-  logger.error(
-    {
-      ...(context ?? {}),
-      error: normalizedError
-    },
-    message
-  );
-}
-
-export interface AuthorizerDeps {
+export interface EndpointDeps {
   registryReader: RegistryReader;
-  producer: AuthorizerEventProducer;
+  producer: EndpointEventProducer;
 }
 
-export interface AuthorizerAppOptions {
+export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
 }
 
-export function createAuthorizerApp(
-  deps: AuthorizerDeps,
-  options: AuthorizerAppOptions = {}
+export function createEndpointApp(
+  deps: EndpointDeps,
+  options: EndpointAppOptions = {}
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const timestampSkewSeconds = options.timestampSkewSeconds ?? 300;
@@ -308,19 +279,28 @@ export function createAuthorizerApp(
   return app;
 }
 
-export async function startAuthorizer() {
-  const config = loadAuthorizerConfig();
-  logInfo('starting authorizer service', {
+export async function startEndpoint() {
+  const config = loadEndpointConfig();
+  const authConfig = loadSensorAuthConfig();
+  
+  logInfo('starting endpoint service', {
     port: config.port,
     source: config.source,
+    auth_strategy: authConfig.strategy,
     kafka_broker_count: config.kafkaBrokers.length,
     timestamp_skew_seconds: config.timestampSkewSeconds,
     producer_max_attempts: config.producerMaxAttempts,
     producer_retry_backoff_ms: config.producerRetryBackoffMs
   });
-  const app = createAuthorizerApp({
-    registryReader: createRegistryReaderFromEnv(),
-    producer: createAuthorizerEventProducer(
+
+  const registryReader = createSensorAuthProvider(
+    authConfig.strategy,
+    createRegistryReaderFromEnv
+  );
+
+  const app = createEndpointApp({
+    registryReader,
+    producer: createEndpointEventProducer(
       config.kafkaBrokers,
       config.source,
       config.producerMaxAttempts,
@@ -337,7 +317,7 @@ export async function startAuthorizer() {
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 if (isDirectRun) {
-  startAuthorizer().catch((error: unknown) => {
+  startEndpoint().catch((error: unknown) => {
     logError('failed to start', error);
     process.exitCode = 1;
   });
