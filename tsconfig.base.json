@@ -17,7 +17,8 @@
     "baseUrl": ".",
     "paths": {
       "@scp/contracts": ["packages/contracts/src/index.ts"],
-      "@scp/registry-sync": ["services/registry-sync/src/index.ts"]
+      "@scp/registry-sync": ["services/registry-sync/src/index.ts"],
+      "@scp/whitelist": ["services/whitelist/src/index.ts"]
     }
   }
 }
