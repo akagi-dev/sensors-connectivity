@@ -25,6 +25,6 @@ export const envelopeSchema: z.ZodObject<
     source: z.string().min(1),
     payload: z.record(z.unknown()),
   })
-  .strict() as typeof envelopeSchema;
+  .strict();
 
 export type Envelope = z.infer<typeof envelopeSchema>;

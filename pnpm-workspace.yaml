@@ -3,5 +3,4 @@ packages:
   - "services/*"
   - "tools/*"
 allowBuilds:
-  '@bufbuild/buf': set this to true or false
   esbuild: false

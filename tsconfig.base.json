@@ -13,9 +13,6 @@
     "sourceMap": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node", "vitest/globals"],
-    "paths": {
-      "@scp/contracts": ["packages/contracts/src/index.ts"]
-    }
+    "types": ["node", "vitest/globals"]
   }
 }
