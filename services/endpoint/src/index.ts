@@ -9,6 +9,7 @@ import type { TelemetryRejectedPayload } from '@scp/contracts';
 import { createEndpointEventProducer, type EndpointEventProducer } from './kafka-producer.js';
 import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
+import { createSensorAuthProvider, loadSensorAuthConfig } from './sensor-auth-factory.js';
 
 const telemetryRequestSchema = z
   .object({
@@ -310,16 +311,25 @@ export function createEndpointApp(
 
 export async function startEndpoint() {
   const config = loadEndpointConfig();
+  const authConfig = loadSensorAuthConfig();
+  
   logInfo('starting endpoint service', {
     port: config.port,
     source: config.source,
+    auth_strategy: authConfig.strategy,
     kafka_broker_count: config.kafkaBrokers.length,
     timestamp_skew_seconds: config.timestampSkewSeconds,
     producer_max_attempts: config.producerMaxAttempts,
     producer_retry_backoff_ms: config.producerRetryBackoffMs
   });
+
+  const registryReader = createSensorAuthProvider(
+    authConfig.strategy,
+    createRegistryReaderFromEnv
+  );
+
   const app = createEndpointApp({
-    registryReader: createRegistryReaderFromEnv(),
+    registryReader,
     producer: createEndpointEventProducer(
       config.kafkaBrokers,
       config.source,
