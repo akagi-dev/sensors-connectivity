@@ -147,6 +147,20 @@ function decodeSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
       offset = decodeVarint(bytes, offset).nextOffset;
       continue;
     }
+    if (wireType === 1) {
+      if (offset + 8 > bytes.length) {
+        throw new Error('Truncated fixed64 field');
+      }
+      offset += 8;
+      continue;
+    }
+    if (wireType === 5) {
+      if (offset + 4 > bytes.length) {
+        throw new Error('Truncated fixed32 field');
+      }
+      offset += 4;
+      continue;
+    }
     throw new Error(`Unsupported protobuf wire type: ${wireType}`);
   }
   return envelope;

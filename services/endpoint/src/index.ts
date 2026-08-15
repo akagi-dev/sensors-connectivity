@@ -90,7 +90,7 @@ export function createEndpointApp(
       sensorHex = toHex(parsedEnvelope.sensorId);
     } catch (error) {
       metrics.rejected += 1;
-      logWarn('telemetry rejected due to invalid envelope', { trace_id: traceId });
+logWarn('telemetry rejected due to invalid envelope', { trace_id: traceId, error: error instanceof Error ? error.message : String(error) });
       return reply.code(400).send({ status: 'rejected', error_code: 'invalid_envelope' });
     }
 

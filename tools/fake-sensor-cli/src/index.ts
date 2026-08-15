@@ -192,7 +192,7 @@ export function createFakeEnvelopePayload(signerSeedHex: string): FakeEnvelopePa
   envelope.signature = signature;
   return {
     envelopeBytes: toSignedEnvelopeBytes(envelope),
-    sensorAddress: encodeAddress(pair.publicKey),
+    sensorAddress: encodeAddress(pair.publicKey, 32),
     timestamp,
     nonce
   };
