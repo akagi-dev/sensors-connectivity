@@ -18,6 +18,11 @@ message SignedEnvelope {
 }
 ```
 
+Protocol and schema references:
+
+- Buf Schema Registry docs: https://buf.build/docs
+- Sensors Social module: https://buf.build/airalab/sensors-social-proto
+
 `message` contains:
 
 ```protobuf
@@ -42,7 +47,37 @@ verify    = Ed25519.verify(public_key, signing_bytes, signature)
 ## Routing and zones
 
 - `X-Request-Id` is passed through for tracing/auditing.
-- `X-Sensor-Zone` remains available for upstream routing policies (`ru`, `eu-west`, `us-east`, `ap-southeast`).
+- `X-Sensor-Zone` remains available for upstream routing policies.
+
+Supported zones:
+
+- `ru`
+- `eu-west`
+- `us-east`
+- `ap-southeast`
+
+Endpoint matrix:
+
+| Environment | Zone         | Base URL                                     |
+| ----------- | ------------ | -------------------------------------------- |
+| production  | global       | `https://ingest.sensors.social`              |
+| production  | ru           | `https://ru.ingest.sensors.social`           |
+| production  | eu-west      | `https://eu-west.ingest.sensors.social`      |
+| production  | us-east      | `https://us-east.ingest.sensors.social`      |
+| production  | ap-southeast | `https://ap-southeast.ingest.sensors.social` |
+| staging     | global       | `https://ingest.staging.sensors.social`      |
+| staging     | ru           | `https://ru.ingest.staging.sensors.social`   |
+| staging     | eu-west      | `https://eu-west.ingest.staging.sensors.social` |
+| staging     | us-east      | `https://us-east.ingest.staging.sensors.social` |
+| staging     | ap-southeast | `https://ap-southeast.ingest.staging.sensors.social` |
+
+Primary path in every zone: `POST /v1/telemetry`.
+
+Global endpoint routing behavior:
+
+1. Route by `X-Sensor-Zone` when present and valid.
+2. If header is absent, route by sender IP geolocation policy.
+3. Return `307 Temporary Redirect` to a zone endpoint so clients preserve method and body.
 
 Connectivity validates signature and envelope constraints; it does not decode inner measurements.
 
