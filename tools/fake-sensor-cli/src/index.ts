@@ -11,6 +11,20 @@ import {
   createSignedEnvelope,
   toSignedEnvelopeBytes,
 } from '@scp/contracts';
+import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import {
+  MessageSchema,
+  MetaSchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/core/v1/message_pb.js';
+import {
+  UrbanSchema,
+  UrbanSensorSchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/device/v1/urban_pb.js';
+import { BME280Schema } from '@buf/airalab_sensors-social-proto.bufbuild_es/sensor/v1/sensor_pb.js';
+import {
+  TemperatureSchema,
+  HumiditySchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/sensor/v1/measurement_pb.js';
 import pino from 'pino';
 
 export interface FakeSensorCliOptions {
@@ -27,49 +41,6 @@ const DEFAULT_COUNT = 1;
 const DEFAULT_INTERVAL_MS = 1000;
 const DEFAULT_SIGNER_SEED_HEX =
   '0x0000000000000000000000000000000000000000000000000000000000000001';
-
-const coreMessageRoot = new protobuf.Root();
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('Measurement').add(
-      new protobuf.Field('value', 1, 'double')
-    )
-  );
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('Bme280')
-      .add(new protobuf.Field('temperature', 1, 'Measurement'))
-      .add(new protobuf.Field('humidity', 2, 'Measurement'))
-  );
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('PublicSensor').add(
-      new protobuf.Field('bme280', 2, 'Bme280')
-    )
-  );
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('Urban').add(
-      new protobuf.Field('sensors', 1, 'PublicSensor', 'repeated')
-    )
-  );
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('Metadata').add(new protobuf.Field('owner', 1, 'bytes'))
-  );
-coreMessageRoot
-  .define('core.v1')
-  .add(
-    new protobuf.Type('Message')
-      .add(new protobuf.Field('metadata', 1, 'Metadata', 'repeated'))
-      .add(new protobuf.Field('urban', 2, 'Urban', 'repeated'))
-  );
-const coreMessageCodec = coreMessageRoot.lookupType('core.v1.Message');
 
 const logger = pino({
   name: 'fake-sensor-cli',
@@ -242,40 +213,76 @@ function createCoreMessageBytes(
   temperatureCelsius: number,
   humidityPercent: number
 ): Uint8Array {
-  const payload = {
-    metadata: [{ owner: ownerPublicKey }],
-    urban: [
-      {
-        sensors: [
-          { bme280: { temperature: { value: temperatureCelsius } } },
-          { bme280: { humidity: { value: humidityPercent } } },
-        ],
-      },
-    ],
-  };
-  const verifyError = coreMessageCodec.verify(payload);
-  if (verifyError) {
-    throw new Error(`Invalid core.v1.Message payload: ${verifyError}`);
-  }
-  return coreMessageCodec.encode(coreMessageCodec.create(payload)).finish();
+  const temperatureSensor = create(UrbanSensorSchema, {
+    sensor: {
+      case: 'bme280',
+      value: create(BME280Schema, {
+        measurement: {
+          case: 'temperature',
+          value: create(TemperatureSchema, { celsius: temperatureCelsius }),
+        },
+      }),
+    },
+  });
+
+  const humiditySensor = create(UrbanSensorSchema, {
+    sensor: {
+      case: 'bme280',
+      value: create(BME280Schema, {
+        measurement: {
+          case: 'humidity',
+          value: create(HumiditySchema, { percent: humidityPercent }),
+        },
+      }),
+    },
+  });
+
+  const urban = create(UrbanSchema, {
+    public: [temperatureSensor, humiditySensor],
+    private: [],
+  });
+
+  const message = create(MessageSchema, {
+    metadata: create(MetaSchema, { owner: ownerPublicKey }),
+    payload: {
+      case: 'urban',
+      value: urban,
+    },
+  });
+
+  return toBinary(MessageSchema, message);
 }
 
 export interface DecodedCoreMessage {
-  metadata?: Array<{ owner?: Uint8Array }>;
-  urban?: Array<{
-    sensors?: Array<{
-      bme280?: {
-        temperature?: { value?: number };
-        humidity?: { value?: number };
-      };
-    }>;
-  }>;
+  metadata?: { owner: Uint8Array };
+  payload?: {
+    case: 'urban';
+    value: {
+      public?: Array<{
+        sensor?:
+          | {
+              case: 'bme280';
+              value: {
+                measurement?:
+                  | {
+                      case: 'temperature';
+                      value?: { celsius?: number };
+                    }
+                  | {
+                      case: 'humidity';
+                      value?: { percent?: number };
+                    };
+              };
+            }
+          | { case: undefined };
+      }>;
+    };
+  };
 }
 
 export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
-  return coreMessageCodec.toObject(coreMessageCodec.decode(bytes), {
-    bytes: Uint8Array,
-  }) as DecodedCoreMessage;
+  const message = fromBinary(MessageSchema, bytes);
+  return message as unknown as DecodedCoreMessage;
 }
 
 export function createFakeEnvelopePayload(

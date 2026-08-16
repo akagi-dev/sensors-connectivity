@@ -133,13 +133,26 @@ describe('fake sensor CLI', () => {
     const message = decodeCoreMessageBytes(
       firstLengthDelimitedField(payload.envelopeBytes, 4)
     );
-    expect(message.metadata).toHaveLength(1);
-    expect(message.urban).toHaveLength(1);
+    expect(message.metadata).toBeDefined();
+    expect(message.metadata?.owner).toHaveLength(32);
+    expect(message.payload?.case).toBe('urban');
+    expect(message.payload?.value?.public).toHaveLength(2);
 
-    const publicSensors = message.urban?.[0]?.sensors;
-    expect(publicSensors).toHaveLength(2);
-    expect(publicSensors?.[0]?.bme280?.temperature?.value).toBeTypeOf('number');
-    expect(publicSensors?.[1]?.bme280?.humidity?.value).toBeTypeOf('number');
+    const publicSensors = message.payload?.value?.public;
+    expect(publicSensors?.[0]?.sensor?.case).toBe('bme280');
+    expect(publicSensors?.[0]?.sensor?.value?.measurement?.case).toBe(
+      'temperature'
+    );
+    expect(
+      publicSensors?.[0]?.sensor?.value?.measurement?.value?.celsius
+    ).toBeTypeOf('number');
+    expect(publicSensors?.[1]?.sensor?.case).toBe('bme280');
+    expect(publicSensors?.[1]?.sensor?.value?.measurement?.case).toBe(
+      'humidity'
+    );
+    expect(
+      publicSensors?.[1]?.sensor?.value?.measurement?.value?.percent
+    ).toBeTypeOf('number');
   });
 
   it('throws for invalid numeric options', () => {
