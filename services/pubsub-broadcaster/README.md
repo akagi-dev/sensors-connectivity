@@ -10,5 +10,5 @@ Consumes `telemetry.authorized.v1`, publishes authorized payloads to GossipSub, 
 - `PUBSUB_BROADCASTER_HEALTH_PORT` (default: `3020`)
 - `PUBSUB_BROADCASTER_MAX_RETRIES` (default: `3`)
 - `PUBSUB_BROADCASTER_RETRY_BACKOFF_MS` (default: `250`)
-- `PUBSUB_TOPIC` (default: `telemetry/authorized/v1`)
+- `PUBSUB_TOPIC` (default: `sensors.social/telemetry/v1`)
 - `PUBSUB_RESERVED_PEERS` (default: empty; comma-separated libp2p multiaddrs to keep permanently connected)

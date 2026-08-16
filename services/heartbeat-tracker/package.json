@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch --env-file=../../.env src/index.ts"
   },
   "dependencies": {
     "@platformatic/kafka": "^2.9.0",

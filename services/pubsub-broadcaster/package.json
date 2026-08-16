@@ -10,13 +10,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch --env-file=../../.env src/index.ts"
   },
   "dependencies": {
-    "@chainsafe/libp2p-gossipsub": "^14.1.2",
     "@platformatic/kafka": "^2.9.0",
     "@scp/contracts": "workspace:*",
-    "libp2p": "^3.3.8",
+    "kubo-rpc-client": "^4.1.1",
     "pino": "^10.3.1"
   },
   "devDependencies": {

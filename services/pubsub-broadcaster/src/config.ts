@@ -6,23 +6,12 @@ export interface PubsubBroadcasterConfig {
   maxRetries: number;
   retryBackoffMs: number;
   pubsubTopic: string;
-  reservedPeers: string[];
+  ipfsApiUrl: string;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-function parseCsvEnv(value: string | undefined): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
 }
 
 export function loadPubsubBroadcasterConfig(
@@ -41,7 +30,7 @@ export function loadPubsubBroadcasterConfig(
       env.PUBSUB_BROADCASTER_RETRY_BACKOFF_MS,
       250
     ),
-    pubsubTopic: env.PUBSUB_TOPIC ?? 'telemetry/authorized/v1',
-    reservedPeers: parseCsvEnv(env.PUBSUB_RESERVED_PEERS),
+    pubsubTopic: env.PUBSUB_TOPIC ?? 'sensors.social/telemetry/v1',
+    ipfsApiUrl: env.IPFS_API_URL ?? 'http://localhost:5001',
   };
 }
