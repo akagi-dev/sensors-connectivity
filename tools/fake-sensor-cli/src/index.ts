@@ -6,7 +6,6 @@ import {
   ed25519Sign,
   encodeAddress,
 } from '@polkadot/util-crypto';
-import protobuf from 'protobufjs';
 import {
   buildEnvelopeSigningBytes,
   createSignedEnvelope,

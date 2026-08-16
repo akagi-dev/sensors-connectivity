@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -14,12 +14,12 @@
   },
   "dependencies": {
     "@scp/contracts": "workspace:*",
-    "ioredis": "^5.6.1",
+    "ioredis": "^6.0.0",
     "kafkajs": "^2.2.4",
-    "pino": "^9.14.0"
+    "pino": "^10.3.1"
   },
   "devDependencies": {
-    "tsdown": "^0.2.14",
-    "tsx": "^4.20.3"
+    "tsdown": "^0.22.14",
+    "tsx": "^4.23.12"
   }
 }
