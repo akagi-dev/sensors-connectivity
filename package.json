@@ -16,8 +16,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
-    "dev": "turbo run dev --parallel",
-    "fake-sensor": "pnpm --filter @scp/fake-sensor-cli fake-sensor"
+    "dev": "turbo run dev", 
+    "fake-sensor": "pnpm --filter @scp/fake-sensor-cli fake-sensor",
+    "init-kafka": "node tools/init-kafka-topics.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

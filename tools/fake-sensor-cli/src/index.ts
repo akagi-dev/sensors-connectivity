@@ -138,7 +138,7 @@ export function parseFakeSensorCliOptions(
     argValues.get('sensor-zone') ?? env.SENSOR_FAKE_SENSOR_ZONE;
   const seed = parseSeedHex(signerSeedHex);
   const signer = ed25519PairFromSeed(seed);
-  const derivedAddress = encodeAddress(signer.publicKey);
+  const derivedAddress = encodeAddress(signer.publicKey, 32);
   const sensorId =
     argValues.get('sensor-id') ?? env.SENSOR_FAKE_SENSOR_ID ?? derivedAddress;
 

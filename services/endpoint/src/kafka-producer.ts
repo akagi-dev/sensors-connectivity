@@ -3,7 +3,7 @@ import {
   type TelemetryAuthorizedPayload,
   type TelemetryRejectedPayload,
 } from '@scp/contracts';
-import { Kafka } from 'kafkajs';
+import { Producer, stringSerializers } from '@platformatic/kafka';
 import { randomUUID } from 'node:crypto';
 
 export interface EndpointEventProducer {
@@ -23,27 +23,11 @@ export function createEndpointEventProducer(
   maxAttempts = 3,
   retryBackoffMs = 100
 ): EndpointEventProducer {
-  const kafka = new Kafka({ clientId: 'endpoint', brokers });
-  const producer = kafka.producer();
-  let connected = false;
-  let connectPromise: Promise<void> | undefined;
-
-  async function ensureConnected() {
-    if (!connected) {
-      if (!connectPromise) {
-        connectPromise = producer.connect().then(() => {
-          connected = true;
-        });
-      }
-
-      try {
-        await connectPromise;
-      } catch (error) {
-        connectPromise = undefined;
-        throw error;
-      }
-    }
-  }
+  const producer = new Producer({
+    clientId: 'endpoint',
+    bootstrapBrokers: brokers,
+    serializers: stringSerializers,
+  });
 
   async function wait(ms: number) {
     await new Promise<void>((resolve) => {
@@ -63,11 +47,10 @@ export function createEndpointEventProducer(
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        await ensureConnected();
         await producer.send({
-          topic,
           messages: [
             {
+              topic,
               key,
               value: JSON.stringify({
                 event_id: eventId,
@@ -92,11 +75,10 @@ export function createEndpointEventProducer(
     }
 
     try {
-      await ensureConnected();
       await producer.send({
-        topic: TELEMETRY_TOPICS.DLQ,
         messages: [
           {
+            topic: TELEMETRY_TOPICS.DLQ,
             key,
             value: JSON.stringify({
               event_id: randomUUID(),

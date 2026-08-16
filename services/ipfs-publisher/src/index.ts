@@ -5,7 +5,6 @@ import {
   type RetryDlqPublisher,
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
-import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';

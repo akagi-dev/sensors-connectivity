@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@platformatic/kafka": "^2.9.0",
     "@scp/contracts": "workspace:*",
-    "kafkajs": "^2.2.4",
     "libp2p": "^3.3.8",
     "pino": "^10.3.1"
   },

@@ -9,11 +9,11 @@ import {
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
 import {
-  Kafka,
-  type Consumer,
-  type EachBatchPayload,
-  type Producer,
-} from 'kafkajs';
+  Consumer,
+  Producer,
+  stringDeserializers,
+  stringSerializers,
+} from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -230,15 +230,21 @@ export function createPubsubBroadcasterService(
   config: PubsubBroadcasterConfig = loadPubsubBroadcasterConfig(),
   deps: PubsubBroadcasterDeps = {}
 ): PubsubBroadcasterService {
-  const kafka = new Kafka({
-    clientId: 'pubsub-broadcaster',
-    brokers: config.kafkaBrokers,
-  });
   const consumer =
     deps.createConsumer?.() ??
-    kafka.consumer({ groupId: config.consumerGroupId });
+    new Consumer({
+      groupId: config.consumerGroupId,
+      clientId: 'pubsub-broadcaster',
+      bootstrapBrokers: config.kafkaBrokers,
+      deserializers: stringDeserializers,
+    });
+  const producer = new Producer({
+    clientId: 'pubsub-broadcaster-producer',
+    bootstrapBrokers: config.kafkaBrokers,
+    serializers: stringSerializers,
+  });
   const publisher =
-    deps.createPublisher?.() ?? createKafkaEnvelopePublisher(kafka.producer());
+    deps.createPublisher?.() ?? createKafkaEnvelopePublisher(producer);
   const idempotencyStore = deps.idempotencyStore ?? new InMemoryEventIdStore();
   const retryStore = new InMemoryRetryCounterStore();
   const createPubsubClient =
@@ -320,7 +326,7 @@ export function createPubsubBroadcasterService(
         }
 
         await Promise.allSettled([
-          consumer.disconnect(),
+          consumer.close(),
           publisher.disconnect(),
           pubsubClient?.stop() ?? Promise.resolve(),
         ]);
@@ -338,7 +344,7 @@ export function createPubsubBroadcasterService(
       started = false;
       logInfo('stopping service');
       await consumer.stop();
-      await consumer.disconnect();
+      await consumer.close();
       await publisher.disconnect();
       await pubsubClient?.stop();
       pubsubClient = null;

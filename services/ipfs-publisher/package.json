@@ -13,8 +13,8 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@platformatic/kafka": "^2.9.0",
     "@scp/contracts": "workspace:*",
-    "kafkajs": "^2.2.4",
     "kubo-rpc-client": "^4.1.1",
     "pino": "^10.3.1"
   },

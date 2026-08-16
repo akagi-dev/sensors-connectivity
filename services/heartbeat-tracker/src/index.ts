@@ -5,7 +5,7 @@ import {
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
 import Redis from 'ioredis';
-import { Kafka, type Consumer } from 'kafkajs';
+import { Consumer, stringDeserializers } from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
@@ -323,13 +323,14 @@ export function createHeartbeatTrackerService(
   config: HeartbeatTrackerConfig = loadHeartbeatTrackerConfig(),
   deps: HeartbeatTrackerDeps = {}
 ): HeartbeatTrackerService {
-  const kafka = new Kafka({
-    clientId: 'heartbeat-tracker',
-    brokers: config.kafkaBrokers,
-  });
   const consumer =
     deps.createConsumer?.() ??
-    kafka.consumer({ groupId: config.consumerGroupId });
+    new Consumer({
+      groupId: config.consumerGroupId,
+      clientId: 'heartbeat-tracker',
+      bootstrapBrokers: config.kafkaBrokers,
+      deserializers: stringDeserializers,
+    });
   const RedisClient = Redis as unknown as RedisConstructor;
   const redis = deps.redis ?? new RedisClient(config.redisUrl);
   const createHealthServer =
@@ -345,6 +346,12 @@ export function createHeartbeatTrackerService(
   let started = false;
   let runPromise: Promise<void> | null = null;
   let healthServer: Server | null = null;
+  let consumerStream: AsyncIterable<{
+    topic: string;
+    partition: number;
+    offset: string;
+    value: string;
+  }> | null = null;
   const consumed = { value: 0 };
 
   const getMetrics = async (): Promise<HeartbeatTrackerMetrics> =>
@@ -370,28 +377,27 @@ export function createHeartbeatTrackerService(
       });
 
       try {
-        await consumer.connect();
-        await consumer.subscribe({
-          topic: TELEMETRY_TOPICS.AUTHORIZED,
-          fromBeginning: false,
+        consumerStream = await consumer.consume({
+          topics: [TELEMETRY_TOPICS.AUTHORIZED],
+          autocommit: true,
         });
         healthServer = createHealthServer(getMetrics, config.healthPort);
 
-        runPromise = consumer.run({
-          eachMessage: async ({ message, partition, topic }) => {
+        runPromise = (async () => {
+          for await (const message of consumerStream!) {
             await handleTelemetryMessage(
-              message.value?.toString('utf8') ?? '',
+              message.value ?? '',
               tracker,
               consumed
             );
             logDebug('kafka message processed', {
-              topic,
-              partition,
+              topic: message.topic,
+              partition: message.partition,
               offset: message.offset,
               consumed: consumed.value,
             });
-          },
-        });
+          }
+        })();
         logInfo('service started');
       } catch (error) {
         logError('service failed to start', error);
@@ -407,7 +413,7 @@ export function createHeartbeatTrackerService(
           healthServer = null;
         }
 
-        await consumer.disconnect();
+        await consumer.close().catch(() => undefined);
         if (typeof redis.quit === 'function') {
           await redis.quit();
         } else if (typeof redis.disconnect === 'function') {
@@ -425,8 +431,7 @@ export function createHeartbeatTrackerService(
 
       started = false;
       logInfo('stopping service');
-      await consumer.stop();
-      await consumer.disconnect();
+      await consumer.close();
       if (typeof redis.quit === 'function') {
         await redis.quit();
       } else if (typeof redis.disconnect === 'function') {

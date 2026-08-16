@@ -1,5 +1,5 @@
 import { TELEMETRY_TOPICS } from '@scp/contracts';
-import type { Consumer } from 'kafkajs';
+import type { Consumer } from '@platformatic/kafka';
 import { describe, expect, it } from 'vitest';
 import { createPubsubBroadcasterService } from '../src/index.js';
 import type { PubsubBroadcasterConfig } from '../src/config.js';
