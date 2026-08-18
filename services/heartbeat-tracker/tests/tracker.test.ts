@@ -1,9 +1,8 @@
 import {
   TELEMETRY_TOPICS,
-  createEnvelope,
-  serializeEnvelope,
+  EnvelopeSchema,
   TelemetryAuthorizedPayloadSchema,
-} from '@scp/contracts';
+} from '@scp/core';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,7 +32,7 @@ function authorizedEnvelope(sensorId: string) {
     signedEnvelope,
   });
 
-  const envelope = createEnvelope({
+  const envelope = create(EnvelopeSchema, {
     eventId: `evt-${sensorId}`,
     eventType: TELEMETRY_TOPICS.AUTHORIZED,
     eventVersion: 'v1',
@@ -42,11 +41,11 @@ function authorizedEnvelope(sensorId: string) {
     payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
   });
 
-  return Buffer.from(serializeEnvelope(envelope));
+  return Buffer.from(toBinary(EnvelopeSchema, envelope));
 }
 
 function encodeSensorId(sensorId: string): string {
-  return Buffer.from(sensorId.padEnd(32, '_').slice(0, 32)).toString('base64');
+  return Buffer.from(sensorId.padEnd(32, '_').slice(0, 32)).toString('hex');
 }
 
 class FakeRedis {

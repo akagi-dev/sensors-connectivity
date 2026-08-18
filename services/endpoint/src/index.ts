@@ -2,14 +2,15 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fileURLToPath } from 'node:url';
-import type { TelemetryRejectedPayload, SignedEnvelope } from '@scp/contracts';
+import { create } from '@bufbuild/protobuf';
+import { SignedEnvelope } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+import type { TelemetryRejectedPayload } from '@scp/core';
 import {
   formatSensorId,
   validateSignedEnvelope,
   REJECTION_CODES,
   TelemetryRejectedPayloadSchema,
-} from '@scp/contracts';
-import { create } from '@bufbuild/protobuf';
+} from '@scp/core';
 import {
   createRegistryReaderFromEnv,
   type RegistryReader,
@@ -17,7 +18,8 @@ import {
 import {
   createEndpointEventProducer,
   type EndpointEventProducer,
-} from './kafka-producer.js';
+} from './producer.js';
+import { Producer } from '@platformatic/kafka';
 import { loadEndpointConfig } from './config.js';
 import { verifyTelemetrySignature } from './signature.js';
 import {
@@ -272,15 +274,18 @@ export async function startEndpoint(): Promise<FastifyInstance> {
     createRegistryReaderFromEnv
   );
 
+  // Create Kafka producer with idempotence enabled
+  const kafkaProducer = new Producer({
+    clientId: 'endpoint',
+    bootstrapBrokers: config.kafkaBrokers,
+    idempotent: true,
+    acks: -1, // 'all' - wait for all in-sync replicas
+  });
+
   const app = createEndpointApp(
     {
       registryReader,
-      producer: createEndpointEventProducer(
-        config.kafkaBrokers,
-        config.source,
-        config.producerMaxAttempts,
-        config.producerRetryBackoffMs
-      ),
+      producer: createEndpointEventProducer(kafkaProducer, config.source),
     },
     {
       timestampSkewSeconds: config.timestampSkewSeconds,

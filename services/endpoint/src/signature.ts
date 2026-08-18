@@ -3,7 +3,7 @@ import {
   decodeAddress,
   ed25519Verify,
 } from '@polkadot/util-crypto';
-import { buildEnvelopeSigningBytes } from '@scp/contracts';
+import { buildEnvelopeSigningBytes } from '@scp/core';
 
 export interface SignatureVerificationInput {
   sensorId: Uint8Array;

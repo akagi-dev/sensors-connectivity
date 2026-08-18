@@ -3,8 +3,6 @@ export interface EndpointConfig {
   source: string;
   kafkaBrokers: string[];
   timestampSkewSeconds: number;
-  producerMaxAttempts: number;
-  producerRetryBackoffMs: number;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -29,14 +27,6 @@ export function loadEndpointConfig(
     timestampSkewSeconds: parsePositiveInt(
       env.ENDPOINT_TIMESTAMP_SKEW_SECONDS,
       300
-    ),
-    producerMaxAttempts: parsePositiveInt(
-      env.ENDPOINT_PRODUCER_MAX_ATTEMPTS,
-      3
-    ),
-    producerRetryBackoffMs: parsePositiveInt(
-      env.ENDPOINT_PRODUCER_RETRY_BACKOFF_MS,
-      100
     ),
   };
 }

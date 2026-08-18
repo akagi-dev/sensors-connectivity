@@ -43,7 +43,7 @@ pnpm dev
 ## Workspace layout
 
 ```text
-packages/contracts         # @scp/contracts - shared schemas, types, validation, consumer runtime
+packages/contracts         # @scp/core - shared schemas, types, validation, consumer runtime
 services/endpoint          # POST /v1/telemetry ingress - protobuf validation, signature verification
 services/registry-sync     # Robonomics blockchain→Redis projection sync service
 services/whitelist         # Whitelist-based sensor authentication provider
@@ -136,10 +136,10 @@ When telemetry validation fails, the endpoint emits `telemetry.rejected.v1` even
 | 4 | `INVALID_SIGNATURE` | Ed25519 signature verification failed |
 | 999 | `KAFKA_PUBLISH_FAILED` | Internal error: Kafka publish failed after retries |
 
-Use `REJECTION_CODES` from `@scp/contracts` to reference these codes in your code:
+Use `REJECTION_CODES` from `@scp/core` to reference these codes in your code:
 
 ```typescript
-import { REJECTION_CODES, getRejectionCodeDescription } from '@scp/contracts';
+import { REJECTION_CODES, getRejectionCodeDescription } from '@scp/core';
 
 // Check rejection reason
 if (payload.reasonCode === REJECTION_CODES.INVALID_SIGNATURE) {

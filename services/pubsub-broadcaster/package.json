@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@platformatic/kafka": "^2.9.0",
-    "@scp/contracts": "workspace:*",
+    "@scp/core": "workspace:*",
     "kubo-rpc-client": "^4.1.1",
     "pino": "^10.3.1"
   },

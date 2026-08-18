@@ -1,12 +1,4 @@
-export const TELEMETRY_TOPICS: {
-  readonly AUTHORIZED: string;
-  readonly REJECTED: string;
-  readonly PUBSUB_RESULT: string;
-  readonly IPFS_RESULT: string;
-  readonly BLOCKCHAIN_RESULT: string;
-  readonly RETRY: string;
-  readonly DLQ: string;
-} = Object.freeze({
+export const TELEMETRY_TOPICS = Object.freeze({
   AUTHORIZED: 'telemetry.authorized.v1',
   REJECTED: 'telemetry.rejected.v1',
   PUBSUB_RESULT: 'telemetry.pubsub.result.v1',

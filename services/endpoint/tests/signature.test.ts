@@ -5,7 +5,7 @@ import {
   encodeAddress,
 } from '@polkadot/util-crypto';
 import { describe, expect, it } from 'vitest';
-import { buildEnvelopeSigningBytes } from '@scp/contracts';
+import { buildEnvelopeSigningBytes } from '@scp/core';
 import { verifyTelemetrySignature } from '../src/signature.js';
 
 describe('verifyTelemetrySignature', () => {

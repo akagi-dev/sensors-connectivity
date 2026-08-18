@@ -1,6 +1,16 @@
 # `@scp/pubsub-broadcaster`
 
-Consumes `telemetry.authorized.v1`, publishes authorized payloads to GossipSub, and emits `telemetry.pubsub.result.v1` outcomes.
+Simple consumer that publishes authorized telemetry to IPFS GossipSub for real-time web UI updates.
+
+## Architecture
+
+- **Pattern**: Simple consumer (observability-only, no retry/DLQ/result events)
+- **Input**: `telemetry.authorized.v1` from Kafka
+- **Output**: SignedEnvelope bytes published to IPFS PubSub topic
+- **Autocommit**: Enabled (best-effort delivery)
+- **Failure handling**: Logs failures but does not retry or emit result events
+
+This service forwards telemetry to real-time subscribers. Failures are acceptable since telemetry is also archived via `ipfs-publisher` and `blockchain-anchor` services.
 
 ## Environment
 
@@ -8,6 +18,13 @@ Consumes `telemetry.authorized.v1`, publishes authorized payloads to GossipSub, 
 - `PUBSUB_BROADCASTER_GROUP_ID` (default: `pubsub-broadcaster-v1`)
 - `PUBSUB_BROADCASTER_SOURCE` (default: `pubsub-broadcaster`)
 - `PUBSUB_BROADCASTER_HEALTH_PORT` (default: `3020`)
-- `PUBSUB_BROADCASTER_MAX_RETRIES` (default: `3`)
-- `PUBSUB_BROADCASTER_RETRY_BACKOFF_MS` (default: `250`)
 - `PUBSUB_TOPIC` (default: `sensors.social/telemetry/v1`)
+- `IPFS_API_URL` (default: `http://localhost:5001`)
+
+## Metrics
+
+Available at `http://localhost:3020/metrics`:
+
+- `consumed`: Total messages consumed
+- `publishSuccess`: Successful PubSub publishes
+- `publishFailure`: Failed PubSub publishes (not retried)

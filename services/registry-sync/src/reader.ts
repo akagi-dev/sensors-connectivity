@@ -1,5 +1,5 @@
 import Redis from 'ioredis';
-import type { SensorAuth } from '@scp/contracts';
+import type { SensorAuth } from '@scp/core';
 import { loadRegistrySyncConfig } from './config.js';
 import { createRedisKeyspace } from './keyspace.js';
 import { RedisProjectionStore, type RedisLike } from './projection-store.js';

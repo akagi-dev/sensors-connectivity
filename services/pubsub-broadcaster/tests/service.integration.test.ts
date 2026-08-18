@@ -1,11 +1,9 @@
 import {
   TELEMETRY_TOPICS,
-  createEnvelope,
-  serializeEnvelope,
-  serializePayloadForEventType,
   TelemetryAuthorizedPayloadSchema,
-} from '@scp/contracts';
-import { create } from '@bufbuild/protobuf';
+  EnvelopeSchema,
+} from '@scp/core';
+import { create, toBinary } from '@bufbuild/protobuf';
 import type { Consumer } from '@platformatic/kafka';
 import { describe, expect, it } from 'vitest';
 import { createPubsubBroadcasterService } from '../src/index.js';
@@ -19,11 +17,8 @@ function testConfig(
     consumerGroupId: 'pubsub-broadcaster-v1',
     source: 'pubsub-broadcaster',
     healthPort: 3020,
-    maxRetries: 2,
-    retryBackoffMs: 0,
     pubsubTopic: 'telemetry/authorized/v1',
     ipfsApiUrl: 'http://localhost:5001',
-    reservedPeers: [],
     ...overrides,
   };
 }
@@ -38,26 +33,26 @@ function createAuthorizedMessage() {
     signedEnvelope: Buffer.alloc(100, 4),
   });
 
-  const envelope = createEnvelope({
+  const envelope = create(EnvelopeSchema, {
     eventId: 'evt-int-1',
     eventType: TELEMETRY_TOPICS.AUTHORIZED,
     eventVersion: 'v1',
     occurredAt: '2026-01-01T00:00:00Z',
     source: 'endpoint',
-    payload: serializePayloadForEventType(TELEMETRY_TOPICS.AUTHORIZED, payload),
+    payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
   });
 
-  return serializeEnvelope(envelope);
+  return Buffer.from(toBinary(EnvelopeSchema, envelope));
 }
 
 const authorizedMessage = createAuthorizedMessage();
 
 describe('pubsub broadcaster integration flow (mock harness)', () => {
-  it('processes consume -> publish -> result event -> commit in order', async () => {
+  it('processes consume -> publish flow with autocommit', async () => {
     const callOrder: string[] = [];
 
     const fakeConsumer = {
-      async consume({ _topics }: { topics: string[]; autocommit: boolean }) {
+      async consume() {
         // Return an async iterable that yields messages
         return (async function* () {
           yield {
@@ -68,24 +63,11 @@ describe('pubsub broadcaster integration flow (mock harness)', () => {
           };
         })();
       },
-      async commit() {
-        callOrder.push('commit');
-      },
-      async disconnect() {},
+      async close() {},
     };
 
     const service = createPubsubBroadcasterService(testConfig({}), {
-      createConsumer: () =>
-        fakeConsumer as unknown as Consumer<Buffer, Buffer, Buffer, Buffer>,
-      createPublisher: () => ({
-        async connect() {},
-        async disconnect() {},
-        async publish(topic) {
-          if (topic === TELEMETRY_TOPICS.PUBSUB_RESULT) {
-            callOrder.push('result');
-          }
-        },
-      }),
+      createConsumer: () => fakeConsumer as unknown as Consumer,
       createPubsubClient: async () => ({
         async start() {},
         async stop() {},
@@ -106,14 +88,18 @@ describe('pubsub broadcaster integration flow (mock harness)', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     await service.stop();
 
-    expect(callOrder).toEqual(['publish', 'result', 'commit']);
+    expect(callOrder).toEqual(['publish']);
+    const metrics = service.getMetrics();
+    expect(metrics.consumed).toBe(1);
+    expect(metrics.publishSuccess).toBe(1);
+    expect(metrics.publishFailure).toBe(0);
   });
 
-  it('routes exhausted transient failures to DLQ and commits afterward', async () => {
+  it('handles publish failures gracefully without retry', async () => {
     const callOrder: string[] = [];
 
     const fakeConsumer = {
-      async consume({ _topics }: { topics: string[]; autocommit: boolean }) {
+      async consume() {
         return (async function* () {
           yield {
             topic: TELEMETRY_TOPICS.AUTHORIZED,
@@ -123,49 +109,36 @@ describe('pubsub broadcaster integration flow (mock harness)', () => {
           };
         })();
       },
-      async commit() {
-        callOrder.push('commit');
-      },
-      async disconnect() {},
+      async close() {},
     };
 
-    const service = createPubsubBroadcasterService(
-      testConfig({ maxRetries: 2 }),
-      {
-        createConsumer: () =>
-          fakeConsumer as unknown as Consumer<Buffer, Buffer, Buffer, Buffer>,
-        createPublisher: () => ({
-          async connect() {},
-          async disconnect() {},
-          async publish(topic) {
-            callOrder.push(topic);
+    const service = createPubsubBroadcasterService(testConfig({}), {
+      createConsumer: () => fakeConsumer as unknown as Consumer,
+      createPubsubClient: async () => ({
+        async start() {},
+        async stop() {},
+        async publish() {
+          callOrder.push('publish-attempt');
+          throw new Error('network timeout');
+        },
+      }),
+      createHealthServer: () =>
+        ({
+          close(callback: (error?: Error) => void) {
+            callback();
           },
-        }),
-        createPubsubClient: async () => ({
-          async start() {},
-          async stop() {},
-          async publish() {
-            const error = new Error('network timeout') as Error & {
-              retriable: boolean;
-            };
-            error.retriable = true;
-            throw error;
-          },
-        }),
-        createHealthServer: () =>
-          ({
-            close(callback: (error?: Error) => void) {
-              callback();
-            },
-          }) as unknown as import('node:http').Server,
-      }
-    );
+        }) as unknown as import('node:http').Server,
+    });
 
     await service.start();
     // Give it time to process the message
     await new Promise((resolve) => setTimeout(resolve, 100));
     await service.stop();
 
-    expect(callOrder).toEqual([TELEMETRY_TOPICS.RETRY, TELEMETRY_TOPICS.DLQ]);
+    expect(callOrder).toEqual(['publish-attempt']);
+    const metrics = service.getMetrics();
+    expect(metrics.consumed).toBe(1);
+    expect(metrics.publishSuccess).toBe(0);
+    expect(metrics.publishFailure).toBe(1);
   });
 });

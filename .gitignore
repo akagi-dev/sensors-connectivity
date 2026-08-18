@@ -1,5 +1,5 @@
 node_modules
-packages/contracts/src/generated
+packages/core/src/generated
 .turbo
 dist
 coverage

@@ -1,4 +1,3 @@
-import type { RetryCounterStore } from '@scp/contracts';
 import type {
   RegistryProjectionRecord,
   ProjectionUpdate,
@@ -132,28 +131,5 @@ return 0
 
   async publishDlq(payload: object): Promise<void> {
     await this.redis.rpush(this.keyspace.dlqEvents, JSON.stringify(payload));
-  }
-}
-
-export class RedisRetryCounterStore implements RetryCounterStore {
-  constructor(
-    private readonly redis: RedisLike,
-    private readonly keyspace: RedisKeyspace
-  ) {}
-
-  async getAttempts(eventId: string): Promise<number> {
-    const raw = await this.redis.get(this.keyspace.retryAttempts(eventId));
-    return Number.parseInt(raw ?? '0', 10) || 0;
-  }
-
-  async setAttempts(eventId: string, attempts: number): Promise<void> {
-    await this.redis.set(
-      this.keyspace.retryAttempts(eventId),
-      String(attempts)
-    );
-  }
-
-  async clearAttempts(eventId: string): Promise<void> {
-    await this.redis.del(this.keyspace.retryAttempts(eventId));
   }
 }

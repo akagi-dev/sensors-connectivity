@@ -1,9 +1,10 @@
 import {
   TELEMETRY_TOPICS,
-  validateEnvelopeWithKnownPayload,
-  type EnvelopeWithParsedPayload,
+  EnvelopeSchema,
+  TelemetryAuthorizedPayloadSchema,
   type TelemetryAuthorizedPayload,
-} from '@scp/contracts';
+} from '@scp/core';
+import { fromBinary } from '@bufbuild/protobuf';
 import Redis from 'ioredis';
 import { Consumer } from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
@@ -283,38 +284,37 @@ export function handleTelemetryMessage(
   tracker: HeartbeatTrackerState,
   consumed: { value: number }
 ): Promise<void> {
-  const envelopeResult = validateEnvelopeWithKnownPayload(new Uint8Array(raw));
-  if (!envelopeResult.success) {
-    logWarn('invalid envelope ignored', {
-      reason: envelopeResult.error.message,
+  try {
+    const envelope = fromBinary(EnvelopeSchema, new Uint8Array(raw));
+
+    if (envelope.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
+      logDebug('non-authorized envelope ignored', {
+        eventType: envelope.eventType,
+      });
+      return Promise.resolve();
+    }
+
+    const payload = fromBinary(
+      TelemetryAuthorizedPayloadSchema,
+      envelope.payload
+    ) as TelemetryAuthorizedPayload;
+
+    const sensorIdHex = Buffer.from(payload.sensorId).toString('hex');
+
+    logDebug('authorized envelope received', {
+      eventId: envelope.eventId,
+      eventType: envelope.eventType,
+      sensor_id: sensorIdHex,
     });
-    return Promise.resolve();
-  }
 
-  if (envelopeResult.data.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
-    logDebug('non-authorized envelope ignored', {
-      eventType: envelopeResult.data.eventType,
-    });
-    return Promise.resolve();
-  }
-
-  const envelope = envelopeResult.data as EnvelopeWithParsedPayload & {
-    eventType: typeof TELEMETRY_TOPICS.AUTHORIZED;
-    payload: TelemetryAuthorizedPayload;
-  };
-
-  const sensorIdForLog = Buffer.from(envelope.payload.sensorId).toString(
-    'base64'
-  );
-
-  return tracker.recordAuthorizedSensor(sensorIdForLog).then(() => {
     consumed.value += 1;
-    logDebug('authorized event consumed', {
-      sensor_id: sensorIdForLog,
-      event_id: envelope.eventId,
-      total_consumed: consumed.value,
+    return tracker.recordAuthorizedSensor(sensorIdHex);
+  } catch (error) {
+    logWarn('envelope parse error', {
+      reason: error instanceof Error ? error.message : String(error),
     });
-  });
+    return Promise.resolve();
+  }
 }
 
 export function createHeartbeatTrackerService(

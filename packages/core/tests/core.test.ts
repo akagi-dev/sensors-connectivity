@@ -1,0 +1,60 @@
+import { describe, expect, it } from 'vitest';
+import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import { TELEMETRY_TOPICS } from '../src/topics.js';
+import { validateSignedEnvelope } from '../src/utils.js';
+import { EnvelopeSchema } from '../src/generated/connectivity/v1/envelope_pb.js';
+import { TelemetryAuthorizedPayloadSchema } from '../src/generated/connectivity/v1/payload_pb.js';
+import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+
+describe('core', () => {
+  it('creates and parses well-formed envelope + authorized payload', () => {
+    const signedEnvelopeBytes = Buffer.alloc(100, 1);
+    const payload = create(TelemetryAuthorizedPayloadSchema, {
+      sensorId: Buffer.alloc(32, 1),
+      signedEnvelope: signedEnvelopeBytes,
+    });
+    const payloadBytes = toBinary(TelemetryAuthorizedPayloadSchema, payload);
+
+    const envelope = create(EnvelopeSchema, {
+      eventId: 'evt-1',
+      eventType: TELEMETRY_TOPICS.AUTHORIZED,
+      eventVersion: 'v1',
+      occurredAt: new Date().toISOString(),
+      source: 'endpoint',
+      payload: payloadBytes,
+    });
+
+    const envelopeBytes = toBinary(EnvelopeSchema, envelope);
+    const parsed = fromBinary(EnvelopeSchema, envelopeBytes);
+
+    expect(parsed.eventType).toBe(TELEMETRY_TOPICS.AUTHORIZED);
+    expect(parsed.eventId).toBe('evt-1');
+  });
+
+  it('exposes exact stable topic constants', () => {
+    expect(TELEMETRY_TOPICS.AUTHORIZED).toBe('telemetry.authorized.v1');
+    expect(TELEMETRY_TOPICS.REJECTED).toBe('telemetry.rejected.v1');
+    expect(TELEMETRY_TOPICS.PUBSUB_RESULT).toBe('telemetry.pubsub.result.v1');
+    expect(TELEMETRY_TOPICS.IPFS_RESULT).toBe('telemetry.ipfs.result.v1');
+    expect(TELEMETRY_TOPICS.BLOCKCHAIN_RESULT).toBe(
+      'telemetry.blockchain.result.v1'
+    );
+    expect(TELEMETRY_TOPICS.RETRY).toBe('telemetry.retry.v1');
+    expect(TELEMETRY_TOPICS.DLQ).toBe('telemetry.dlq.v1');
+    expect(Object.isFrozen(TELEMETRY_TOPICS)).toBe(true);
+  });
+
+  it('validates signed envelope protobuf bytes', () => {
+    const envelope = create(SignedEnvelopeSchema, {
+      sensorId: Buffer.alloc(32, 1),
+      timestamp: BigInt(Date.now()),
+      nonce: Buffer.alloc(16, 2),
+      message: Buffer.from('abc'),
+      signature: Buffer.alloc(64, 4),
+    });
+    const envelopeBytes = toBinary(SignedEnvelopeSchema, envelope);
+    const parsed = validateSignedEnvelope(envelopeBytes);
+    expect(parsed.sensorId.length).toBe(32);
+    expect(parsed.signature.length).toBe(64);
+  });
+});

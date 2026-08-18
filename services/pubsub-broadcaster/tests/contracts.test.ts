@@ -1,14 +1,9 @@
 import {
   TELEMETRY_TOPICS,
-  validateEnvelopeWithKnownPayload,
-  createEnvelope,
-  serializeEnvelope,
-  serializePayloadForEventType,
   TelemetryAuthorizedPayloadSchema,
-  TelemetryPubsubResultPayloadSchema,
-  TelemetryPubsubResultPayload_Status,
-} from '@scp/contracts';
-import { create } from '@bufbuild/protobuf';
+  EnvelopeSchema,
+} from '@scp/core';
+import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
 import { describe, expect, it } from 'vitest';
 
 describe('pubsub broadcaster contract compatibility', () => {
@@ -22,47 +17,19 @@ describe('pubsub broadcaster contract compatibility', () => {
       signedEnvelope: Buffer.alloc(100, 4),
     });
 
-    const envelope = createEnvelope({
+    const envelope = create(EnvelopeSchema, {
       eventId: 'evt-contract-1',
       eventType: TELEMETRY_TOPICS.AUTHORIZED,
       eventVersion: 'v1',
       occurredAt: '2026-01-01T00:00:00Z',
       source: 'endpoint',
-      payload: serializePayloadForEventType(
-        TELEMETRY_TOPICS.AUTHORIZED,
-        payload
-      ),
+      payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
     });
 
-    const result = validateEnvelopeWithKnownPayload(
-      serializeEnvelope(envelope)
-    );
+    const envelopeBytes = toBinary(EnvelopeSchema, envelope);
+    const parsed = fromBinary(EnvelopeSchema, envelopeBytes);
 
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts telemetry.pubsub.result.v1 envelope/payload', () => {
-    const payload = create(TelemetryPubsubResultPayloadSchema, {
-      status: TelemetryPubsubResultPayload_Status.SUBMITTED,
-      sensorId: Buffer.alloc(32, 1),
-    });
-
-    const envelope = createEnvelope({
-      eventId: 'evt-contract-2',
-      eventType: TELEMETRY_TOPICS.PUBSUB_RESULT,
-      eventVersion: 'v1',
-      occurredAt: '2026-01-01T00:00:00Z',
-      source: 'pubsub-broadcaster',
-      payload: serializePayloadForEventType(
-        TELEMETRY_TOPICS.PUBSUB_RESULT,
-        payload
-      ),
-    });
-
-    const result = validateEnvelopeWithKnownPayload(
-      serializeEnvelope(envelope)
-    );
-
-    expect(result.success).toBe(true);
+    expect(parsed.eventType).toBe(TELEMETRY_TOPICS.AUTHORIZED);
+    expect(parsed.eventId).toBe('evt-contract-1');
   });
 });

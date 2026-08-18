@@ -1,5 +1,5 @@
-import type { SensorAuth } from '@scp/contracts';
-import { formatSensorId } from '@scp/contracts';
+import type { SensorAuth } from '@scp/core';
+import { formatSensorId } from '@scp/core';
 import { decodeAddress } from '@polkadot/util-crypto';
 import { logDebug, logInfo } from './logger.js';
 
@@ -90,9 +90,9 @@ export class WhitelistAuth implements SensorAuth {
   }
 
   /**
-   * Gets the list of allowed sensor IDs (as hex strings for display).
+   * Gets the list of allowed sensor IDs.
    *
-   * @returns Array of allowed sensor IDs in hex format
+   * @returns Array of allowed sensor IDs in SS58 format
    */
   getAllowedSensors(): string[] {
     return this.allowedSensors.map(formatSensorId);

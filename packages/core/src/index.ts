@@ -1,7 +1,4 @@
-// Re-export modules
-export * from './cid-encoding.js';
-export * from './consumer-runtime.js';
-export * from './validation.js';
+// Re-export core modules
 export * from './utils.js';
 export * from './rejection-codes.js';
 export * from './sensor-auth.js';

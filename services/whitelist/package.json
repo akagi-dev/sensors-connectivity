@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@scp/contracts": "workspace:*",
+    "@scp/core": "workspace:*",
     "pino": "^10.3.1"
   },
   "devDependencies": {

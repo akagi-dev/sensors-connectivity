@@ -26,7 +26,6 @@ export interface RedisKeyspace {
   processedEvents: string;
   cursorHeight: string;
   dlqEvents: string;
-  retryAttempts: (eventId: string) => string;
 }
 
 export function createRedisKeyspace(prefix: string): RedisKeyspace {
@@ -37,7 +36,6 @@ export function createRedisKeyspace(prefix: string): RedisKeyspace {
     processedEvents: `${prefix}:events:processed`,
     cursorHeight: `${prefix}:cursor:finalized-height`,
     dlqEvents: `${prefix}:dlq:events`,
-    retryAttempts: (eventId: string) => `${prefix}:retry:${eventId}`,
   };
 }
 

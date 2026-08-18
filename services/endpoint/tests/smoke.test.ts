@@ -4,7 +4,7 @@ import {
   ed25519PairFromSeed,
   ed25519Sign,
 } from '@polkadot/util-crypto';
-import { buildEnvelopeSigningBytes, REJECTION_CODES } from '@scp/contracts';
+import { buildEnvelopeSigningBytes, REJECTION_CODES } from '@scp/core';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
 import { createEndpointApp } from '../src/index.js';
