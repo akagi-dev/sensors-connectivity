@@ -34,17 +34,12 @@ describe('core', () => {
   it('exposes exact stable topic constants', () => {
     expect(TELEMETRY_TOPICS.AUTHORIZED).toBe('telemetry.authorized.v1');
     expect(TELEMETRY_TOPICS.REJECTED).toBe('telemetry.rejected.v1');
-    expect(TELEMETRY_TOPICS.PUBSUB_RESULT).toBe('telemetry.pubsub.result.v1');
-    expect(TELEMETRY_TOPICS.IPFS_RESULT).toBe('telemetry.ipfs.result.v1');
-    expect(TELEMETRY_TOPICS.BLOCKCHAIN_RESULT).toBe(
-      'telemetry.blockchain.result.v1'
-    );
-    expect(TELEMETRY_TOPICS.RETRY).toBe('telemetry.retry.v1');
+    expect(TELEMETRY_TOPICS.IPFS_PUBLISHED).toBe('ipfs.published.v1');
     expect(TELEMETRY_TOPICS.DLQ).toBe('telemetry.dlq.v1');
     expect(Object.isFrozen(TELEMETRY_TOPICS)).toBe(true);
   });
 
-  it('validates signed envelope protobuf bytes', () => {
+  it('validates signed envelope protobuf bytes', async () => {
     const envelope = create(SignedEnvelopeSchema, {
       sensorId: Buffer.alloc(32, 1),
       timestamp: BigInt(Date.now()),
@@ -53,7 +48,7 @@ describe('core', () => {
       signature: Buffer.alloc(64, 4),
     });
     const envelopeBytes = toBinary(SignedEnvelopeSchema, envelope);
-    const parsed = validateSignedEnvelope(envelopeBytes);
+    const parsed = await validateSignedEnvelope(envelopeBytes);
     expect(parsed.sensorId.length).toBe(32);
     expect(parsed.signature.length).toBe(64);
   });

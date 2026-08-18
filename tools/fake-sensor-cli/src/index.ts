@@ -1,12 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { buildEnvelopeSigningBytes } from '@scp/core';
 import {
   cryptoWaitReady,
   ed25519PairFromSeed,
   ed25519Sign,
   encodeAddress,
 } from '@polkadot/util-crypto';
-import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import { create, toBinary } from '@bufbuild/protobuf';
 import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
 import {
   MessageSchema,
@@ -249,89 +250,30 @@ function createCoreMessageBytes(
   return toBinary(MessageSchema, message);
 }
 
-export interface DecodedCoreMessage {
-  metadata?: { owner: Uint8Array };
-  payload?: {
-    case: 'urban';
-    value: {
-      public?: Array<{
-        sensor?:
-          | {
-              case: 'bme280';
-              value: {
-                measurement?:
-                  | {
-                      case: 'temperature';
-                      value?: { celsius?: number };
-                    }
-                  | {
-                      case: 'humidity';
-                      value?: { percent?: number };
-                    };
-              };
-            }
-          | { case: undefined };
-      }>;
-    };
-  };
-}
-
-export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
-  const message = fromBinary(MessageSchema, bytes);
-  return message as unknown as DecodedCoreMessage;
-}
-
-/**
- * Build signing bytes for envelope (sensor_id || timestamp_le || nonce || message)
- */
-function buildEnvelopeSigningBytes(
-  sensorId: Uint8Array,
-  timestamp: bigint,
-  nonce: Uint8Array,
-  message: Uint8Array
-): Uint8Array {
-  const timestampBytes = new Uint8Array(8);
-  new DataView(timestampBytes.buffer).setBigUint64(0, timestamp, true);
-  const total = sensorId.length + 8 + nonce.length + message.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  out.set(sensorId, offset);
-  offset += sensorId.length;
-  out.set(timestampBytes, offset);
-  offset += 8;
-  out.set(nonce, offset);
-  offset += nonce.length;
-  out.set(message, offset);
-  return out;
-}
-
 export function createFakeEnvelopePayload(
   signerSeedHex: string
 ): FakeEnvelopePayload {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
+  const sensorId = pair.publicKey;
   const temperature = Number((18 + Math.random() * 8).toFixed(2));
   const humidity = Number((30 + Math.random() * 40).toFixed(2));
-  const messageBytes = createCoreMessageBytes(
-    pair.publicKey,
-    temperature,
-    humidity
-  );
+  const message = createCoreMessageBytes(sensorId, temperature, humidity);
   const timestamp = BigInt(Date.now());
   const nonce = randomBytes(16);
 
-  const signingBytes = buildEnvelopeSigningBytes(
-    pair.publicKey,
+  const signingBytes = buildEnvelopeSigningBytes({
+    sensorId,
     timestamp,
     nonce,
-    messageBytes
-  );
+    message,
+  });
   const signature = ed25519Sign(signingBytes, pair);
 
   const envelope = create(SignedEnvelopeSchema, {
-    sensorId: pair.publicKey,
+    sensorId,
     timestamp,
     nonce,
-    message: messageBytes,
+    message,
     signature,
   });
 

@@ -88,7 +88,7 @@ Connectivity validates signature and envelope constraints; it does not decode in
 - `nonce` MUST be 16..32 bytes
 - `message` MUST be non-empty
 - timestamp skew policy: reject outside configured window (default `±300s`)
-- replay scope: `(hex(sensor_id), hex(nonce))`
+- replay scope: `(sensor_id, nonce)`
 
 ## Responses
 
@@ -98,22 +98,6 @@ Connectivity validates signature and envelope constraints; it does not decode in
 - `409` duplicate nonce
 - `503` Kafka/infra unavailable
 
-## Kafka authorized payload
-
-`telemetry.authorized.v1` payload uses binary-safe strings:
-
-```json
-{
-  "sensor_id": "<base64 32-byte pubkey>",
-  "timestamp": 1723727295123,
-  "nonce": "<base64 nonce>",
-  "message": "<base64 serialized core.v1.Message>",
-  "signature": "<base64 64-byte signature>",
-  "envelope": "<base64 serialized SignedEnvelope>"
-}
-```
-
-## Proto source of truth
+## Sensors payload proto 
 
 - Buf module: `buf.build/airalab/sensors-social-proto`
-- SDK package target: `@buf/airalab_sensors-social-proto.bufbuild_es` (when registry/network access is available)

@@ -10,6 +10,7 @@ import {
   validateSignedEnvelope,
   REJECTION_CODES,
   TelemetryRejectedPayloadSchema,
+  TelemetryAuthorizedPayloadSchema,
 } from '@scp/core';
 import {
   createRegistryReaderFromEnv,
@@ -21,12 +22,11 @@ import {
 } from './producer.js';
 import { Producer } from '@platformatic/kafka';
 import { loadEndpointConfig } from './config.js';
-import { verifyTelemetrySignature } from './signature.js';
 import {
   createSensorAuthProvider,
   loadSensorAuthConfig,
 } from './sensor-auth-factory.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 
 export interface EndpointDeps {
   registryReader: RegistryReader;
@@ -37,10 +37,10 @@ export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
 }
 
-function parseSignedEnvelope(request: FastifyRequest): {
+async function parseSignedEnvelope(request: FastifyRequest): Promise<{
   envelope: SignedEnvelope;
   rawBytes: Uint8Array;
-} {
+}> {
   const contentType = request.headers['content-type']?.toLowerCase() ?? '';
   if (
     !contentType.includes('application/protobuf') &&
@@ -52,7 +52,7 @@ function parseSignedEnvelope(request: FastifyRequest): {
     throw new Error('Expected binary protobuf request body');
   }
   const rawBytes = Uint8Array.from(request.body);
-  return { envelope: validateSignedEnvelope(rawBytes), rawBytes };
+  return { envelope: await validateSignedEnvelope(rawBytes, true), rawBytes };
 }
 
 export function createEndpointApp(
@@ -97,15 +97,18 @@ export function createEndpointApp(
       let rawEnvelopeBytes: Uint8Array;
 
       try {
-        const parsed = parseSignedEnvelope(request);
+        const parsed = await parseSignedEnvelope(request);
         parsedEnvelope = parsed.envelope;
         rawEnvelopeBytes = parsed.rawBytes;
       } catch (error) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to invalid envelope', {
-          trace_id: traceId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        logWarn(
+          'telemetry rejected due to invalid envelope (corrupted or bad signature)',
+          {
+            trace_id: traceId,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
         return reply
           .code(400)
           .send({ status: 'rejected', error_code: 'invalid_envelope' });
@@ -188,35 +191,17 @@ export function createEndpointApp(
           .send({ status: 'rejected', error_code: 'duplicate_nonce' });
       }
 
-      const signatureValid = await verifyTelemetrySignature({
-        sensorId: parsedEnvelope.sensorId,
-        timestamp: parsedEnvelope.timestamp,
-        nonce: parsedEnvelope.nonce,
-        message: parsedEnvelope.message,
-        signature: parsedEnvelope.signature,
-        signerAddress: record.sensorId,
+      logDebug('sensor message validation pass', {
+        trace_id: traceId,
+        sensor_id: formatSensorId(parsedEnvelope.sensorId),
       });
-
-      if (!signatureValid) {
-        metrics.rejected += 1;
-        publishRejectedEvent(
-          create(TelemetryRejectedPayloadSchema, {
-            sensorId: parsedEnvelope.sensorId,
-            reasonCode: REJECTION_CODES.INVALID_SIGNATURE,
-            reasonMessage: 'Signature verification failed',
-          })
-        );
-        return reply
-          .code(401)
-          .send({ status: 'rejected', error_code: 'invalid_signature' });
-      }
 
       try {
         await deps.producer.publishAuthorized(
-          {
+          create(TelemetryAuthorizedPayloadSchema, {
             sensorId: parsedEnvelope.sensorId,
             signedEnvelope: rawEnvelopeBytes,
-          },
+          }),
           traceId
         );
       } catch (error) {
@@ -265,8 +250,6 @@ export async function startEndpoint(): Promise<FastifyInstance> {
     auth_strategy: authConfig.strategy,
     kafka_broker_count: config.kafkaBrokers.length,
     timestamp_skew_seconds: config.timestampSkewSeconds,
-    producer_max_attempts: config.producerMaxAttempts,
-    producer_retry_backoff_ms: config.producerRetryBackoffMs,
   });
 
   const registryReader = createSensorAuthProvider(

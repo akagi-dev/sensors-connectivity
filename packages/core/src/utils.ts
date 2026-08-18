@@ -1,4 +1,8 @@
-import { encodeAddress } from '@polkadot/util-crypto';
+import {
+  encodeAddress,
+  ed25519Verify,
+  cryptoWaitReady,
+} from '@polkadot/util-crypto';
 import { fromBinary } from '@bufbuild/protobuf';
 import {
   SignedEnvelopeSchema,
@@ -42,7 +46,10 @@ export function buildEnvelopeSigningBytes(
  * Parse and validate SignedEnvelope from protobuf bytes.
  * Uses generated @bufbuild/protobuf code for parsing.
  */
-export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
+export async function validateSignedEnvelope(
+  bytes: Uint8Array,
+  checkSignature?: boolean | undefined
+): Promise<SignedEnvelope> {
   const envelope = fromBinary(SignedEnvelopeSchema, bytes);
   if (envelope.sensorId.length !== SENSOR_ID_LENGTH) {
     throw new Error(`sensor_id must be ${SENSOR_ID_LENGTH} bytes`);
@@ -61,6 +68,19 @@ export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
   if (envelope.message.length === 0) {
     throw new Error('message must be non-empty');
   }
+
+  if (checkSignature) {
+    await cryptoWaitReady();
+    const isSignatureValid = ed25519Verify(
+      buildEnvelopeSigningBytes(envelope),
+      envelope.signature,
+      envelope.sensorId
+    );
+    if (!isSignatureValid) {
+      throw new Error('bad signature');
+    }
+  }
+
   return envelope;
 }
 

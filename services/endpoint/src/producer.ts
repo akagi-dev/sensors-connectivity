@@ -35,7 +35,7 @@ export function createEndpointEventProducer(
   async function publish(
     topic:
       typeof TELEMETRY_TOPICS.AUTHORIZED | typeof TELEMETRY_TOPICS.REJECTED,
-    key: string,
+    key: Uint8Array,
     payload: TelemetryAuthorizedPayload | TelemetryRejectedPayload,
     traceId?: string
   ): Promise<string> {
@@ -62,7 +62,7 @@ export function createEndpointEventProducer(
         messages: [
           {
             topic,
-            key,
+            key: Buffer.from(key),
             value: Buffer.from(toBinary(EnvelopeSchema, envelope)),
           },
         ],
@@ -77,7 +77,7 @@ export function createEndpointEventProducer(
   }
 
   async function publishToDlq(
-    key: string,
+    key: Uint8Array,
     error: unknown,
     traceId?: string
   ): Promise<void> {
@@ -109,7 +109,7 @@ export function createEndpointEventProducer(
         messages: [
           {
             topic: TELEMETRY_TOPICS.DLQ,
-            key,
+            key: Buffer.from(key),
             value: Buffer.from(toBinary(EnvelopeSchema, envelope)),
           },
         ],
@@ -126,7 +126,7 @@ export function createEndpointEventProducer(
     ): Promise<string> {
       return publish(
         TELEMETRY_TOPICS.AUTHORIZED,
-        Buffer.from(payload.sensorId).toString('hex'),
+        payload.sensorId,
         payload,
         traceId
       );
@@ -137,9 +137,7 @@ export function createEndpointEventProducer(
     ): Promise<string> {
       return publish(
         TELEMETRY_TOPICS.REJECTED,
-        payload.sensorId
-          ? Buffer.from(payload.sensorId).toString('hex')
-          : 'unknown',
+        payload.sensorId ? payload.sensorId : Buffer.from('unknown'),
         payload,
         traceId
       );

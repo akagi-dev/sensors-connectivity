@@ -120,9 +120,7 @@ message Envelope {
 |------------|---------------|-------------|
 | `telemetry.authorized.v1` | `TelemetryAuthorizedPayload` | Successfully validated sensor telemetry |
 | `telemetry.rejected.v1` | `TelemetryRejectedPayload` | Failed validation with rejection reason |
-| `telemetry.pubsub.result.v1` | `TelemetryPubsubResultPayload` | PubSub broadcast result |
-| `telemetry.ipfs.result.v1` | `TelemetryIpfsPublishedPayload` | IPFS publish result with CID |
-| `telemetry.blockchain.result.v1` | `TelemetryBlockchainResultPayload` | Blockchain anchoring result |
+| `ipfs.published.v1` | `TelemetryIpfsPublishedPayload` | IPFS publish result with CID |
 
 ### Rejection Reason Codes
 

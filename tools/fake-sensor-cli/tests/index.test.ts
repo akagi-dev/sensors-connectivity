@@ -6,68 +6,11 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   createFakeEnvelopePayload,
-  decodeCoreMessageBytes,
   parseFakeSensorCliOptions,
 } from '../src/index.js';
-
-function readVarint(
-  bytes: Uint8Array,
-  start: number
-): { value: number; nextOffset: number } {
-  let value = 0;
-  let shift = 0;
-  let offset = start;
-  while (offset < bytes.length) {
-    const current = bytes[offset];
-    if (current === undefined) {
-      break;
-    }
-    value |= (current & 0x7f) << shift;
-    offset += 1;
-    if ((current & 0x80) === 0) {
-      return { value, nextOffset: offset };
-    }
-    shift += 7;
-  }
-  throw new Error('invalid varint');
-}
-
-function firstLengthDelimitedField(
-  bytes: Uint8Array,
-  targetField: number
-): Uint8Array {
-  let offset = 0;
-  while (offset < bytes.length) {
-    const { value: tag, nextOffset: tagOffset } = readVarint(bytes, offset);
-    offset = tagOffset;
-    const fieldNumber = tag >> 3;
-    const wireType = tag & 0x07;
-    if (wireType === 2) {
-      const { value: length, nextOffset } = readVarint(bytes, offset);
-      const end = nextOffset + length;
-      const value = bytes.subarray(nextOffset, end);
-      if (fieldNumber === targetField) {
-        return Uint8Array.from(value);
-      }
-      offset = end;
-      continue;
-    }
-    if (wireType === 0) {
-      offset = readVarint(bytes, offset).nextOffset;
-      continue;
-    }
-    if (wireType === 1) {
-      offset += 8;
-      continue;
-    }
-    if (wireType === 5) {
-      offset += 4;
-      continue;
-    }
-    throw new Error(`unsupported wire type ${wireType}`);
-  }
-  throw new Error(`missing field ${targetField}`);
-}
+import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+import { MessageSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/core/v1/message_pb.js';
+import { fromBinary } from '@bufbuild/protobuf';
 
 describe('fake sensor CLI', () => {
   it('parses args with defaults', async () => {
@@ -138,9 +81,8 @@ describe('fake sensor CLI', () => {
     );
     expect(payload.nonce.length).toBe(16);
 
-    const message = decodeCoreMessageBytes(
-      firstLengthDelimitedField(payload.envelopeBytes, 4)
-    );
+    const envelope = fromBinary(SignedEnvelopeSchema, payload.envelopeBytes);
+    const message = fromBinary(MessageSchema, envelope.message);
     expect(message.metadata).toBeDefined();
     expect(message.metadata?.owner).toHaveLength(32);
     expect(message.payload?.case).toBe('urban');

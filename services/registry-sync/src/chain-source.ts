@@ -24,7 +24,7 @@ export class SubstrateFinalizedRegistryEventSource implements FinalizedRegistryE
   private processing = Promise.resolve();
 
   constructor(private readonly substrateWsUrl: string) {
-    this.provider = new WsProvider(this.substrateWsUrl, 0);
+    this.provider = new WsProvider(this.substrateWsUrl);
   }
 
   async connect(): Promise<void> {

@@ -70,8 +70,16 @@ export class WhitelistAuth implements SensorAuth {
    * @returns Promise resolving to true if the nonce has been seen, false otherwise
    */
   async isNonceSeen(sensorId: Uint8Array, nonce: Uint8Array): Promise<boolean> {
-    const key = `${formatSensorId(sensorId)}:${formatSensorId(nonce)}`;
-    return this.nonces.has(key);
+    const sensorIdHex = Buffer.from(sensorId).toString('hex');
+    const nonceHex = Buffer.from(nonce).toString('hex');
+    const key = `${sensorIdHex}:${nonceHex}`;
+    const seen = this.nonces.has(key);
+    logDebug('nonce seen', {
+      sensor_id: formatSensorId(sensorId),
+      nonce: nonceHex,
+      seen,
+    });
+    return seen;
   }
 
   /**
@@ -81,11 +89,13 @@ export class WhitelistAuth implements SensorAuth {
    * @param nonce - The nonce to remember
    */
   async rememberNonce(sensorId: Uint8Array, nonce: Uint8Array): Promise<void> {
-    const key = `${formatSensorId(sensorId)}:${formatSensorId(nonce)}`;
+    const sensorIdHex = Buffer.from(sensorId).toString('hex');
+    const nonceHex = Buffer.from(nonce).toString('hex');
+    const key = `${sensorIdHex}:${nonceHex}`;
     this.nonces.add(key);
     logDebug('nonce remembered', {
       sensor_id: formatSensorId(sensorId),
-      nonce: formatSensorId(nonce),
+      nonce: nonceHex,
     });
   }
 
