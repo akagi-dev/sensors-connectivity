@@ -7,7 +7,9 @@ import {
   formatSensorId,
   validateSignedEnvelope,
   REJECTION_CODES,
+  TelemetryRejectedPayloadSchema,
 } from '@scp/contracts';
+import { create } from '@bufbuild/protobuf';
 import {
   createRegistryReaderFromEnv,
   type RegistryReader,
@@ -137,11 +139,13 @@ export function createEndpointApp(
         skewMs > timestampSkewSeconds * 1000
       ) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.STALE_TIMESTAMP,
-          reasonMessage: 'Timestamp outside allowed skew window',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.STALE_TIMESTAMP,
+            reasonMessage: 'Timestamp outside allowed skew window',
+          })
+        );
         return reply
           .code(401)
           .send({ status: 'rejected', error_code: 'stale_timestamp' });
@@ -152,11 +156,13 @@ export function createEndpointApp(
       );
       if (!record || !record.enabled) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.SENSOR_FORBIDDEN,
-          reasonMessage: 'Sensor is unknown or disabled',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.SENSOR_FORBIDDEN,
+            reasonMessage: 'Sensor is unknown or disabled',
+          })
+        );
         return reply
           .code(403)
           .send({ status: 'rejected', error_code: 'sensor_forbidden' });
@@ -168,11 +174,13 @@ export function createEndpointApp(
       );
       if (nonceSeen) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.DUPLICATE_NONCE,
-          reasonMessage: 'Nonce already used for this sensor',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.DUPLICATE_NONCE,
+            reasonMessage: 'Nonce already used for this sensor',
+          })
+        );
         return reply
           .code(409)
           .send({ status: 'rejected', error_code: 'duplicate_nonce' });
@@ -189,11 +197,13 @@ export function createEndpointApp(
 
       if (!signatureValid) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.INVALID_SIGNATURE,
-          reasonMessage: 'Signature verification failed',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.INVALID_SIGNATURE,
+            reasonMessage: 'Signature verification failed',
+          })
+        );
         return reply
           .code(401)
           .send({ status: 'rejected', error_code: 'invalid_signature' });

@@ -56,10 +56,10 @@ export function createSensorAuthProvider(
 
     // Adapt WhitelistAuth to RegistryReader interface
     return {
-      async authenticate(sensorId: string): Promise<boolean> {
+      async authenticate(sensorId: Uint8Array): Promise<boolean> {
         return whitelistAuth.authenticate(sensorId);
       },
-      async getSensorRecord(sensorId: string) {
+      async getSensorRecord(sensorId: Uint8Array) {
         const isAuthenticated = await whitelistAuth.authenticate(sensorId);
         if (!isAuthenticated) {
           return null;
@@ -69,10 +69,16 @@ export function createSensorAuthProvider(
           enabled: true,
         };
       },
-      async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
+      async isNonceSeen(
+        sensorId: Uint8Array,
+        nonce: Uint8Array
+      ): Promise<boolean> {
         return whitelistAuth.isNonceSeen(sensorId, nonce);
       },
-      async rememberNonce(sensorId: string, nonce: string): Promise<void> {
+      async rememberNonce(
+        sensorId: Uint8Array,
+        nonce: Uint8Array
+      ): Promise<void> {
         await whitelistAuth.rememberNonce(sensorId, nonce);
       },
     };

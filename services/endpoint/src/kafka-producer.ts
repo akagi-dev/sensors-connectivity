@@ -4,9 +4,11 @@ import {
   serializeEnvelope,
   serializePayloadForEventType,
   REJECTION_CODES,
+  TelemetryRejectedPayloadSchema,
   type TelemetryAuthorizedPayload,
   type TelemetryRejectedPayload,
 } from '@scp/contracts';
+import { create } from '@bufbuild/protobuf';
 import { Producer } from '@platformatic/kafka';
 import { randomUUID } from 'node:crypto';
 
@@ -87,14 +89,14 @@ export function createEndpointEventProducer(
 
     // DLQ publish failure - create a simple rejected payload envelope
     try {
-      const dlqPayload = {
+      const dlqPayload = create(TelemetryRejectedPayloadSchema, {
         sensorId: new Uint8Array(),
         reasonCode: REJECTION_CODES.KAFKA_PUBLISH_FAILED,
         reasonMessage:
           lastError instanceof Error
             ? lastError.message
             : 'Kafka publish failed',
-      };
+      });
 
       const dlqPayloadBytes = serializePayloadForEventType(
         TELEMETRY_TOPICS.REJECTED,

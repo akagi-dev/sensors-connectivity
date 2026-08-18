@@ -2,9 +2,11 @@ import {
   InMemoryDedupStore,
   runConsumerProcessingRule,
   TELEMETRY_TOPICS,
+  TelemetryAuthorizedPayloadSchema,
   type RetryDlqPublisher,
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
+import { create } from '@bufbuild/protobuf';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
@@ -49,13 +51,10 @@ export async function startIpfsPublisher(): Promise<void> {
   const batch: AuthorizedBatch = {
     batch_id: `batch-${Date.now()}`,
     events: [
-      {
-        sensor_id: 'sensor-dev-1',
-        timestamp: Date.now(),
-        nonce: 'nonce-dev',
-        message: Buffer.from(JSON.stringify({ temp: 22 })).toString('base64'),
-        signature: '0x00',
-      },
+      create(TelemetryAuthorizedPayloadSchema, {
+        sensorId: Buffer.alloc(32, 1),
+        signedEnvelope: Buffer.alloc(100, 1),
+      }),
     ],
   };
 

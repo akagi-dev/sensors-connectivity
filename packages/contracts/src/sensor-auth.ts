@@ -9,8 +9,8 @@ export interface SensorAuth {
   /**
    * Authenticates a sensor by its ID.
    *
-   * @param sensorId - The sensor ID to authenticate
+   * @param sensorId - The sensor ID to authenticate (32-byte public key)
    * @returns Promise resolving to true if the sensor is authorized, false otherwise
    */
-  authenticate(sensorId: string): Promise<boolean>;
+  authenticate(sensorId: Uint8Array): Promise<boolean>;
 }

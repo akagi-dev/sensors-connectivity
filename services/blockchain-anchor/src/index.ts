@@ -42,13 +42,6 @@ function logError(
 export async function startBlockchainAnchor(): Promise<void> {
   const config = loadBlockchainAnchorConfig();
 
-  // TODO: wire kafkajs consumer group for telemetry.ipfs.result.v1.
-  const kafka = new Kafka({
-    clientId: 'blockchain-anchor',
-    brokers: ['localhost:9092'],
-  });
-  void kafka;
-
   // TODO: wire @polkadot/api extrinsic submission and receipt handling.
   const _provider = new WsProvider(config.substrateWsUrl, 0);
   void _provider;
