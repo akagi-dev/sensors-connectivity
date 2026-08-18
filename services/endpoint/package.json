@@ -15,15 +15,16 @@
   "dependencies": {
     "@fastify/rate-limit": "^11.2.0",
     "@platformatic/kafka": "^2.9.0",
-    "@polkadot/util-crypto": "^14.0.3",
     "@scp/contracts": "workspace:*",
     "@scp/registry-sync": "workspace:*",
     "@scp/whitelist": "workspace:*",
     "fastify": "^5.12.0",
-    "pino": "^10.3.1",
-    "zod": "^4.4.3"
+    "pino": "^10.3.1"
   },
   "devDependencies": {
+    "@polkadot/util-crypto": "^14.0.3",
+    "@buf/airalab_sensors-social-proto.bufbuild_es": "2.14.0-20260815104319-7f23b240b94d.1",
+    "@bufbuild/protobuf": "^2.14.0",
     "tsdown": "^0.22.14",
     "tsx": "^4.23.12"
   }

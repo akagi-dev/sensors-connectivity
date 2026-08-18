@@ -1,11 +1,11 @@
 import {
   TELEMETRY_TOPICS,
   validateEnvelopeWithKnownPayload,
-  type Envelope,
+  type EnvelopeWithParsedPayload,
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
 import Redis from 'ioredis';
-import { Consumer, stringDeserializers } from '@platformatic/kafka';
+import { Consumer } from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
@@ -279,17 +279,11 @@ export function createHeartbeatTrackerState(
 }
 
 export function handleTelemetryMessage(
-  raw: string,
+  raw: Buffer,
   tracker: HeartbeatTrackerState,
   consumed: { value: number }
 ): Promise<void> {
-  const parsed = safeJsonParse(raw);
-  if (!parsed.success) {
-    logWarn('invalid JSON message ignored', { reason: parsed.error });
-    return Promise.resolve();
-  }
-
-  const envelopeResult = validateEnvelopeWithKnownPayload(parsed.data);
+  const envelopeResult = validateEnvelopeWithKnownPayload(new Uint8Array(raw));
   if (!envelopeResult.success) {
     logWarn('invalid envelope ignored', {
       reason: envelopeResult.error.message,
@@ -297,23 +291,27 @@ export function handleTelemetryMessage(
     return Promise.resolve();
   }
 
-  if (envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
+  if (envelopeResult.data.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
     logDebug('non-authorized envelope ignored', {
-      eventType: envelopeResult.data.event_type,
+      eventType: envelopeResult.data.eventType,
     });
     return Promise.resolve();
   }
 
-  const envelope = envelopeResult.data as Envelope & {
-    event_type: typeof TELEMETRY_TOPICS.AUTHORIZED;
+  const envelope = envelopeResult.data as EnvelopeWithParsedPayload & {
+    eventType: typeof TELEMETRY_TOPICS.AUTHORIZED;
     payload: TelemetryAuthorizedPayload;
   };
 
-  return tracker.recordAuthorizedSensor(envelope.payload.sensor_id).then(() => {
+  const sensorIdForLog = Buffer.from(envelope.payload.sensorId).toString(
+    'base64'
+  );
+
+  return tracker.recordAuthorizedSensor(sensorIdForLog).then(() => {
     consumed.value += 1;
     logDebug('authorized event consumed', {
-      sensor_id: envelope.payload.sensor_id,
-      event_id: envelope.event_id,
+      sensor_id: sensorIdForLog,
+      event_id: envelope.eventId,
       total_consumed: consumed.value,
     });
   });
@@ -329,7 +327,6 @@ export function createHeartbeatTrackerService(
       groupId: config.consumerGroupId,
       clientId: 'heartbeat-tracker',
       bootstrapBrokers: config.kafkaBrokers,
-      deserializers: stringDeserializers,
     });
   const RedisClient = Redis as unknown as RedisConstructor;
   const redis = deps.redis ?? new RedisClient(config.redisUrl);
@@ -349,8 +346,8 @@ export function createHeartbeatTrackerService(
   let consumerStream: AsyncIterable<{
     topic: string;
     partition: number;
-    offset: string;
-    value: string;
+    offset: bigint;
+    value: Buffer | null;
   }> | null = null;
   const consumed = { value: 0 };
 
@@ -385,11 +382,11 @@ export function createHeartbeatTrackerService(
 
         runPromise = (async () => {
           for await (const message of consumerStream!) {
-            await handleTelemetryMessage(
-              message.value ?? '',
-              tracker,
-              consumed
-            );
+            if (!message.value) {
+              logWarn('received null message value; skipping');
+              continue;
+            }
+            await handleTelemetryMessage(message.value, tracker, consumed);
             logDebug('kafka message processed', {
               topic: message.topic,
               partition: message.partition,
@@ -499,19 +496,6 @@ export function startHealthAndMetricsServer(
   server.listen({ host: '0.0.0.0', port });
   logInfo('HTTP server listening', { port, host: '0.0.0.0' });
   return server;
-}
-
-function safeJsonParse(
-  raw: string
-): { success: true; data: unknown } | { success: false; error: string } {
-  try {
-    return { success: true, data: JSON.parse(raw) };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON payload',
-    };
-  }
 }
 
 export async function startHeartbeatTracker(): Promise<HeartbeatTrackerService> {

@@ -2,21 +2,26 @@ import {
   InMemoryRetryCounterStore,
   TELEMETRY_TOPICS,
   runConsumerProcessingRule,
-  validateEnvelopeWithKnownPayload,
+  parseEnvelope,
+  parsePayloadForEventType,
+  formatSensorId,
+  createEnvelope,
+  serializePayloadForEventType,
+  TelemetryPubsubResultPayloadSchema,
+  TelemetryPubsubResultPayload_Status,
   type Envelope,
   type RetryDlqPublisher,
   type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
-import {
-  Consumer,
-  Producer,
-  stringDeserializers,
-  stringSerializers,
-} from '@platformatic/kafka';
+import { create } from '@bufbuild/protobuf';
+import { Consumer, Producer } from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { create, type KuboRPCClient } from 'kubo-rpc-client';
+import {
+  create as createKuboClient,
+  type KuboRPCClient,
+} from 'kubo-rpc-client';
 import pino from 'pino';
 import {
   loadPubsubBroadcasterConfig,
@@ -39,8 +44,10 @@ export interface PubsubBroadcasterService {
   getMetrics(): Readonly<PubsubBroadcasterMetrics>;
 }
 
-export type AuthorizedTelemetryEnvelope = Envelope & {
-  event_type: typeof TELEMETRY_TOPICS.AUTHORIZED;
+export type AuthorizedTelemetryMessage = {
+  eventId: string;
+  eventType: typeof TELEMETRY_TOPICS.AUTHORIZED;
+  traceId?: string | undefined;
   payload: TelemetryAuthorizedPayload;
 };
 
@@ -64,7 +71,7 @@ interface EventIdStore {
 interface PubsubBroadcasterDeps {
   createPubsubClient?: () => Promise<PubsubClient>;
   createPublisher?: () => EnvelopePublisher;
-  createConsumer?: () => Consumer<string, string, string, string>;
+  createConsumer?: () => Consumer<Buffer, Buffer, Buffer, Buffer>;
   idempotencyStore?: EventIdStore;
   createHealthServer?: (
     metrics: PubsubBroadcasterMetrics,
@@ -98,7 +105,7 @@ interface MessageData {
   topic: string;
   partition: number;
   offset: bigint;
-  value: string;
+  value: Buffer;
 }
 
 const logger = pino({
@@ -130,7 +137,7 @@ function logError(
 }
 
 export async function processAuthorizedEnvelope(
-  envelope: AuthorizedTelemetryEnvelope,
+  message: AuthorizedTelemetryMessage,
   commitOffset: () => Promise<void>,
   context: ProcessingContext
 ): Promise<'processed' | 'duplicate' | 'dlq'> {
@@ -140,69 +147,85 @@ export async function processAuthorizedEnvelope(
   while (pending) {
     let publishStatus: 'submitted' | 'failed' = 'submitted';
     let publishError: Error | undefined;
-    const status = await runConsumerProcessingRule(envelope, {
+    const sensorIdKey = formatSensorId(message.payload.sensorId);
+
+    const status = await runConsumerProcessingRule(message, {
       retryPolicy: {
         maxAttempts: context.config.maxRetries,
-        getEventId: (current) => current.event_id,
+        getEventId: (current) => current.eventId,
         store: context.retryStore,
       },
       idempotency: {
-        getEventId: (current) => current.event_id,
+        getEventId: (current) => current.eventId,
         hasProcessed: (eventId) => context.idempotencyStore.has(eventId),
         markProcessed: (eventId) => context.idempotencyStore.mark(eventId),
       },
       performExternalAction: async (current) => {
-        // Extract the original protobuf SignedEnvelope bytes
-        const envelopeBase64 = current.payload.envelope;
-        if (typeof envelopeBase64 !== 'string') {
-          throw new Error('Missing envelope field in authorized payload');
-        }
-
-        const envelopeBytes = Buffer.from(envelopeBase64, 'base64');
-
         try {
-          await context.pubsub.publish(
-            context.config.pubsubTopic,
-            envelopeBytes
-          );
-          context.metrics.publishSuccess += 1;
-        } catch (error) {
-          context.metrics.publishFailure += 1;
-          if (isTransientPublishError(error)) {
-            throw error;
-          }
+          // Forward the original SignedEnvelope to PubSub
+          const signedEnvelopeBytes = current.payload.signedEnvelope;
 
+          const pubsubTopic = context.config.pubsubTopic;
+          await context.pubsub.publish(pubsubTopic, signedEnvelopeBytes);
+
+          publishStatus = 'submitted';
+          context.metrics.publishSuccess += 1;
+
+          logInfo('telemetry published to PubSub', {
+            sensor_id: formatSensorId(current.payload.sensorId),
+            pubsub_topic: pubsubTopic,
+          });
+        } catch (error) {
           publishStatus = 'failed';
           publishError =
-            error instanceof Error ? error : new Error('Unknown publish error');
+            error instanceof Error ? error : new Error(String(error));
+          context.metrics.publishFailure += 1;
+
+          // Check if error is transient and should be retried
+          if (!isTransientPublishError(error)) {
+            // Non-transient errors should not retry, but we should emit a result event
+            // before proceeding to the final commit
+            return;
+          }
+
+          // Transient errors will be re-thrown to trigger retry logic
+          throw error;
         }
       },
       waitForConfirmation: async () => {},
-      emitResultEvent: async (current) => ({
-        event_id: randomUUID(),
-        event_type: TELEMETRY_TOPICS.PUBSUB_RESULT,
-        event_version: 'v1',
-        occurred_at: new Date().toISOString(),
-        trace_id: current.trace_id,
-        source: context.config.source,
-        payload: {
-          status: publishStatus,
-          pubsub_topic: context.config.pubsubTopic,
-          sensor_id: current.payload.sensor_id,
-          nonce: current.payload.nonce,
+      emitResultEvent: async (current) => {
+        const resultPayload = create(TelemetryPubsubResultPayloadSchema, {
+          status:
+            publishStatus === 'submitted'
+              ? TelemetryPubsubResultPayload_Status.SUBMITTED
+              : TelemetryPubsubResultPayload_Status.FAILED,
+          sensorId: current.payload.sensorId,
           ...(publishError
             ? {
-                error_code: 'publish_failed',
-                error_message: publishError.message,
+                errorCode: 1, // Generic error code
+                errorMessage: publishError.message,
               }
             : {}),
-        },
-      }),
+        });
+
+        return createEnvelope({
+          eventId: randomUUID(),
+          eventType: TELEMETRY_TOPICS.PUBSUB_RESULT,
+          eventVersion: 'v1',
+          occurredAt: new Date().toISOString(),
+          source: context.config.source,
+          traceId: current.traceId,
+          payload: serializePayloadForEventType(
+            TELEMETRY_TOPICS.PUBSUB_RESULT,
+            resultPayload
+          ),
+        });
+      },
       publishResultEvent: async (result) => {
         await context.publisher.publish(
           TELEMETRY_TOPICS.PUBSUB_RESULT,
-          `${result.payload.sensor_id}:${result.payload.nonce}`,
-          result as Envelope
+          sensorIdKey,
+          result
         );
       },
       commitOffset,
@@ -217,7 +240,6 @@ export async function processAuthorizedEnvelope(
 
     if (status === 'dlq') {
       context.metrics.dlqCount += 1;
-      await commitOffset();
       finalStatus = 'dlq';
       pending = false;
       continue;
@@ -247,7 +269,6 @@ export function createPubsubBroadcasterService(
       groupId: config.consumerGroupId,
       clientId: 'pubsub-broadcaster',
       bootstrapBrokers: config.kafkaBrokers,
-      deserializers: stringDeserializers,
     });
   const producer =
     deps.createPublisher?.() ??
@@ -268,7 +289,7 @@ export function createPubsubBroadcasterService(
     topic: string;
     partition: number;
     offset: bigint;
-    value: string;
+    value: Buffer;
   }> | null = null;
   const metrics: PubsubBroadcasterMetrics = {
     consumed: 0,
@@ -335,7 +356,7 @@ export function createPubsubBroadcasterService(
           healthServer = null;
         }
 
-        await consumer.close().catch(() => undefined);
+        await consumer.disconnect().catch(() => undefined);
         await producer.disconnect().catch(() => undefined);
         await pubsubClient?.stop().catch(() => undefined);
         pubsubClient = null;
@@ -352,7 +373,7 @@ export function createPubsubBroadcasterService(
 
       started = false;
       logInfo('stopping service');
-      await consumer.close();
+      await consumer.disconnect();
       await producer.disconnect();
       await pubsubClient?.stop();
       pubsubClient = null;
@@ -381,7 +402,7 @@ export function createPubsubBroadcasterService(
 
 async function processMessage(
   message: MessageData,
-  consumer: Consumer<string, string, string, string>,
+  consumer: Consumer<Buffer, Buffer, Buffer, Buffer>,
   context: ProcessingContext
 ): Promise<void> {
   context.metrics.consumed += 1;
@@ -399,49 +420,72 @@ async function processMessage(
     });
   };
 
-  const raw = message.value ?? '';
-  const parsed = safeJsonParse(raw);
-  if (!parsed.success) {
-    logWarn('invalid JSON payload routed to DLQ', {
-      topic: message.topic,
-      partition: message.partition,
-      offset: message.offset.toString(),
-      reason: parsed.error,
-    });
-    await publishInvalidMessageDlq(raw, parsed.error, context, commitOffset);
-    return;
-  }
+  const msgContext = {
+    topic: message.topic,
+    partition: message.partition,
+    offset: message.offset.toString(),
+  };
 
-  const envelopeResult = validateEnvelopeWithKnownPayload(parsed.data);
-  if (
-    !envelopeResult.success ||
-    envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED
-  ) {
-    const reason = envelopeResult.success
-      ? `Unsupported event type: ${envelopeResult.data.event_type}`
-      : envelopeResult.error.message;
+  // Only parse the envelope header, not the payload
+  const raw = message.value ?? Buffer.from([]);
+  let envelope;
+  try {
+    envelope = parseEnvelope(new Uint8Array(raw));
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : 'Invalid protobuf envelope';
     logWarn('invalid envelope routed to DLQ', {
-      topic: message.topic,
-      partition: message.partition,
-      offset: message.offset.toString(),
+      ...msgContext,
       reason,
     });
-    await publishInvalidMessageDlq(parsed.data, reason, context, commitOffset);
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
     return;
   }
 
+  if (envelope.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
+    const reason = `Unsupported event type: ${envelope.eventType}`;
+    logWarn('invalid envelope routed to DLQ', {
+      ...msgContext,
+      reason,
+    });
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
+    return;
+  }
+
+  // Parse only the payload to get sensorId and signedEnvelope
+  let payload: TelemetryAuthorizedPayload;
+  try {
+    payload = parsePayloadForEventType(
+      TELEMETRY_TOPICS.AUTHORIZED,
+      envelope.payload
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Invalid payload';
+    logWarn('invalid payload routed to DLQ', {
+      ...msgContext,
+      reason,
+    });
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
+    return;
+  }
+
+  const authorizedMessage: AuthorizedTelemetryMessage = {
+    eventId: envelope.eventId,
+    eventType: TELEMETRY_TOPICS.AUTHORIZED,
+    traceId: envelope.traceId,
+    payload,
+  };
+
   const status = await processAuthorizedEnvelope(
-    envelopeResult.data as AuthorizedTelemetryEnvelope,
+    authorizedMessage,
     commitOffset,
     context
   );
   logInfo('authorized envelope handled', {
-    eventId: envelopeResult.data.event_id,
-    traceId: envelopeResult.data.trace_id,
+    eventId: envelope.eventId,
+    traceId: envelope.traceId,
     status,
-    topic: message.topic,
-    partition: message.partition,
-    offset: message.offset.toString(),
+    ...msgContext,
   });
 }
 
@@ -544,7 +588,6 @@ function createKafkaEnvelopePublisher(brokers: string[]): EnvelopePublisher {
   const producer = new Producer({
     clientId: 'pubsub-broadcaster-producer',
     bootstrapBrokers: brokers,
-    serializers: stringSerializers,
   });
   let connected = false;
 
@@ -577,7 +620,7 @@ function createKafkaEnvelopePublisher(brokers: string[]): EnvelopePublisher {
  * Create an IPFS Kubo RPC client for PubSub messaging
  */
 async function createIpfsPubsubClient(apiUrl: string): Promise<PubsubClient> {
-  const client: KuboRPCClient = create({ url: apiUrl });
+  const client: KuboRPCClient = createKuboClient({ url: apiUrl });
   let started = false;
 
   return {
@@ -614,19 +657,6 @@ async function createIpfsPubsubClient(apiUrl: string): Promise<PubsubClient> {
       await client.pubsub.publish(topic, data);
     },
   };
-}
-
-function safeJsonParse(
-  raw: string
-): { success: true; data: unknown } | { success: false; error: string } {
-  try {
-    return { success: true, data: JSON.parse(raw) };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON payload',
-    };
-  }
 }
 
 function isTransientPublishError(error: unknown): boolean {

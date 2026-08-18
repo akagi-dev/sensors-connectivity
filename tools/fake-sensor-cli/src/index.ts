@@ -6,12 +6,8 @@ import {
   ed25519Sign,
   encodeAddress,
 } from '@polkadot/util-crypto';
-import {
-  buildEnvelopeSigningBytes,
-  createSignedEnvelope,
-  toSignedEnvelopeBytes,
-} from '@scp/contracts';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
 import {
   MessageSchema,
   MetaSchema,
@@ -285,6 +281,30 @@ export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
   return message as unknown as DecodedCoreMessage;
 }
 
+/**
+ * Build signing bytes for envelope (sensor_id || timestamp_le || nonce || message)
+ */
+function buildEnvelopeSigningBytes(
+  sensorId: Uint8Array,
+  timestamp: bigint,
+  nonce: Uint8Array,
+  message: Uint8Array
+): Uint8Array {
+  const timestampBytes = new Uint8Array(8);
+  new DataView(timestampBytes.buffer).setBigUint64(0, timestamp, true);
+  const total = sensorId.length + 8 + nonce.length + message.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  out.set(sensorId, offset);
+  offset += sensorId.length;
+  out.set(timestampBytes, offset);
+  offset += 8;
+  out.set(nonce, offset);
+  offset += nonce.length;
+  out.set(message, offset);
+  return out;
+}
+
 export function createFakeEnvelopePayload(
   signerSeedHex: string
 ): FakeEnvelopePayload {
@@ -298,16 +318,25 @@ export function createFakeEnvelopePayload(
   );
   const timestamp = BigInt(Date.now());
   const nonce = randomBytes(16);
-  const envelope = createSignedEnvelope({
+
+  const signingBytes = buildEnvelopeSigningBytes(
+    pair.publicKey,
+    timestamp,
+    nonce,
+    messageBytes
+  );
+  const signature = ed25519Sign(signingBytes, pair);
+
+  const envelope = create(SignedEnvelopeSchema, {
     sensorId: pair.publicKey,
     timestamp,
     nonce,
     message: messageBytes,
+    signature,
   });
-  const signature = ed25519Sign(buildEnvelopeSigningBytes(envelope), pair);
-  envelope.signature = signature;
+
   return {
-    envelopeBytes: toSignedEnvelopeBytes(envelope),
+    envelopeBytes: toBinary(SignedEnvelopeSchema, envelope),
     sensorAddress: encodeAddress(pair.publicKey, 32),
     timestamp,
     nonce,

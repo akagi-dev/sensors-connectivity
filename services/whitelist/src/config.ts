@@ -1,10 +1,6 @@
-import { z } from 'zod';
-
-const whitelistConfigSchema: z.ZodTypeAny = z.object({
-  allowedSensorIds: z.array(z.string()).default([]),
-});
-
-export type WhitelistConfig = z.infer<typeof whitelistConfigSchema>;
+export interface WhitelistConfig {
+  allowedSensorIds: string[];
+}
 
 /**
  * Loads whitelist configuration from environment variables.
@@ -21,7 +17,7 @@ export function loadWhitelistConfig(): WhitelistConfig {
         .filter(Boolean)
     : [];
 
-  return whitelistConfigSchema.parse({
+  return {
     allowedSensorIds,
-  });
+  };
 }

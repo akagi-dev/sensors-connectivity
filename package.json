@@ -16,11 +16,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
-    "dev": "turbo run dev", 
+    "dev": "turbo run dev",
     "fake-sensor": "pnpm --filter @scp/fake-sensor-cli fake-sensor",
-    "init-kafka": "node tools/init-kafka-topics.mjs"
+    "init-kafka": "node tools/init-kafka-topics.mjs",
+    "generate": "buf generate"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.72.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",
     "@typescript-eslint/eslint-plugin": "^8.38.0",

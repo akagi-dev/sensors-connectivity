@@ -45,11 +45,6 @@ function logError(
 
 export async function startIpfsPublisher(): Promise<void> {
   const config = loadIpfsPublisherConfig();
-  const kafka = new Kafka({
-    clientId: 'ipfs-publisher',
-    brokers: ['localhost:9092'],
-  });
-  void kafka;
 
   const batch: AuthorizedBatch = {
     batch_id: `batch-${Date.now()}`,

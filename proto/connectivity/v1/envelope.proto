@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package connectivity.v1;
+
+// Envelope wraps all Kafka events with metadata for tracing and routing.
+message Envelope {
+  // Unique identifier for this event
+  string event_id = 1;
+  
+  // Event type identifier (e.g., "telemetry.authorized.v1")
+  string event_type = 2;
+  
+  // Schema version for this event
+  string event_version = 3;
+  
+  // RFC3339 timestamp with timezone offset
+  string occurred_at = 4;
+  
+  // Optional distributed tracing ID
+  optional string trace_id = 5;
+  
+  // Service that emitted this event
+  string source = 6;
+  
+  // Event-specific payload
+  bytes payload = 7;
+}

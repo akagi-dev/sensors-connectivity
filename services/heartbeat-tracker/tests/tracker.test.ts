@@ -1,4 +1,10 @@
-import { TELEMETRY_TOPICS } from '@scp/contracts';
+import {
+  TELEMETRY_TOPICS,
+  createEnvelope,
+  serializeEnvelope,
+  TelemetryAuthorizedPayloadSchema,
+} from '@scp/contracts';
+import { create, toBinary } from '@bufbuild/protobuf';
 import { describe, expect, it } from 'vitest';
 import {
   createHeartbeatTrackerState,
@@ -20,22 +26,23 @@ function createClock(start = Date.parse('2026-01-01T00:00:00Z')) {
 
 function authorizedEnvelope(sensorId: string) {
   const sensorBytes = Buffer.from(sensorId.padEnd(32, '_').slice(0, 32));
-  return JSON.stringify({
-    event_id: `evt-${sensorId}`,
-    event_type: TELEMETRY_TOPICS.AUTHORIZED,
-    event_version: 'v1',
-    occurred_at: '2026-01-01T00:00:00Z',
-    source: 'endpoint',
-    payload: {
-      sensor_id: sensorBytes.toString('base64'),
-      timestamp: Date.parse('2026-01-01T00:00:00Z'),
-      nonce: Buffer.from(
-        `nonce-${sensorId}`.padEnd(16, '_').slice(0, 16)
-      ).toString('base64'),
-      message: Buffer.from(JSON.stringify({ temp: 21 })).toString('base64'),
-      signature: Buffer.alloc(64, 3).toString('base64'),
-    },
+  const signedEnvelope = Buffer.alloc(100, 0); // Fake signed envelope bytes
+
+  const payload = create(TelemetryAuthorizedPayloadSchema, {
+    sensorId: sensorBytes,
+    signedEnvelope,
   });
+
+  const envelope = createEnvelope({
+    eventId: `evt-${sensorId}`,
+    eventType: TELEMETRY_TOPICS.AUTHORIZED,
+    eventVersion: 'v1',
+    occurredAt: '2026-01-01T00:00:00Z',
+    source: 'endpoint',
+    payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
+  });
+
+  return Buffer.from(serializeEnvelope(envelope));
 }
 
 function encodeSensorId(sensorId: string): string {

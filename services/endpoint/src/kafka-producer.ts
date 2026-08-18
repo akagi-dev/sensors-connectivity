@@ -1,9 +1,13 @@
 import {
   TELEMETRY_TOPICS,
+  createEnvelope,
+  serializeEnvelope,
+  serializePayloadForEventType,
+  REJECTION_CODES,
   type TelemetryAuthorizedPayload,
   type TelemetryRejectedPayload,
 } from '@scp/contracts';
-import { Producer, stringSerializers } from '@platformatic/kafka';
+import { Producer } from '@platformatic/kafka';
 import { randomUUID } from 'node:crypto';
 
 export interface EndpointEventProducer {
@@ -26,7 +30,6 @@ export function createEndpointEventProducer(
   const producer = new Producer({
     clientId: 'endpoint',
     bootstrapBrokers: brokers,
-    serializers: stringSerializers,
   });
 
   async function wait(ms: number) {
@@ -45,6 +48,22 @@ export function createEndpointEventProducer(
     let lastError: unknown;
     const attempts = Math.max(maxAttempts, 1);
 
+    // Serialize payload to protobuf binary
+    const payloadBytes = serializePayloadForEventType(topic, payload);
+
+    // Create and serialize envelope
+    const envelope = createEnvelope({
+      eventId,
+      eventType: topic,
+      eventVersion: 'v1',
+      occurredAt: new Date().toISOString(),
+      source,
+      payload: payloadBytes,
+      traceId,
+    });
+
+    const envelopeBytes = serializeEnvelope(envelope);
+
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         await producer.send({
@@ -52,15 +71,7 @@ export function createEndpointEventProducer(
             {
               topic,
               key,
-              value: JSON.stringify({
-                event_id: eventId,
-                event_type: topic,
-                event_version: 'v1',
-                occurred_at: new Date().toISOString(),
-                trace_id: traceId,
-                source,
-                payload,
-              }),
+              value: Buffer.from(envelopeBytes),
             },
           ],
         });
@@ -74,29 +85,38 @@ export function createEndpointEventProducer(
       }
     }
 
+    // DLQ publish failure - create a simple rejected payload envelope
     try {
+      const dlqPayload = {
+        sensorId: new Uint8Array(),
+        reasonCode: REJECTION_CODES.KAFKA_PUBLISH_FAILED,
+        reasonMessage:
+          lastError instanceof Error
+            ? lastError.message
+            : 'Kafka publish failed',
+      };
+
+      const dlqPayloadBytes = serializePayloadForEventType(
+        TELEMETRY_TOPICS.REJECTED,
+        dlqPayload
+      );
+
+      const dlqEnvelope = createEnvelope({
+        eventId: randomUUID(),
+        eventType: TELEMETRY_TOPICS.DLQ,
+        eventVersion: 'v1',
+        occurredAt: new Date().toISOString(),
+        source,
+        payload: dlqPayloadBytes,
+        traceId,
+      });
+
       await producer.send({
         messages: [
           {
             topic: TELEMETRY_TOPICS.DLQ,
             key,
-            value: JSON.stringify({
-              event_id: randomUUID(),
-              event_type: TELEMETRY_TOPICS.DLQ,
-              event_version: 'v1',
-              occurred_at: new Date().toISOString(),
-              trace_id: traceId,
-              source,
-              payload: {
-                failed_topic: topic,
-                reason_code: 'publish_failed',
-                reason_message:
-                  lastError instanceof Error
-                    ? lastError.message
-                    : 'Kafka publish failed',
-                failed_payload: payload,
-              },
-            }),
+            value: Buffer.from(serializeEnvelope(dlqEnvelope)),
           },
         ],
       });
@@ -114,7 +134,7 @@ export function createEndpointEventProducer(
     ): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.AUTHORIZED,
-        `${payload.sensor_id}:${payload.nonce}`,
+        Buffer.from(payload.sensorId).toString('hex'),
         payload,
         traceId
       );
@@ -125,7 +145,9 @@ export function createEndpointEventProducer(
     ): Promise<string> {
       return sendEnvelope(
         TELEMETRY_TOPICS.REJECTED,
-        `${payload.sensor_id ?? 'unknown'}:${payload.reason_code}`,
+        payload.sensorId
+          ? Buffer.from(payload.sensorId).toString('hex')
+          : 'unknown',
         payload,
         traceId
       );

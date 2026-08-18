@@ -11,10 +11,10 @@ TypeScript monorepo for the event-driven telemetry pipeline described in:
 
 - Node.js 22+ LTS + TypeScript (strict mode with extra-strict flags)
 - pnpm workspaces + Turborepo
-- Fastify, kafkajs, zod
-- Protobuf-es (`@bufbuild/protobuf`), `@polkadot/util-crypto` for Ed25519
-- `kubo-rpc-client`, libp2p + GossipSub, `@polkadot/api`, ioredis
 - tsup, vitest, eslint, prettier
+- Protobuf-es (`@bufbuild/protobuf`)
+- `@polkadot/util-crypto`, `@polkadot/api`, 
+- `kubo-rpc-client`, `ioredis`, `@platformatic/kafka`, Fastify
 
 ## Prerequisites
 
@@ -97,6 +97,59 @@ Available options:
 - `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
 
 The CLI now sends binary protobuf `crypto.v1.SignedEnvelope` (`Content-Type: application/protobuf`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+
+## Kafka Message Format
+
+All Kafka messages use **binary protobuf encoding** with the following envelope structure:
+
+```protobuf
+message Envelope {
+  string event_id = 1;        // Unique event identifier (UUID)
+  string event_type = 2;      // e.g., "telemetry.authorized.v1"
+  string event_version = 3;   // Schema version
+  string occurred_at = 4;     // RFC3339 timestamp with timezone
+  optional string trace_id = 5; // Distributed tracing ID
+  string source = 6;          // Originating service name
+  bytes payload = 7;          // Event-specific protobuf payload
+}
+```
+
+### Event Types and Payloads
+
+| Event Type | Payload Schema | Description |
+|------------|---------------|-------------|
+| `telemetry.authorized.v1` | `TelemetryAuthorizedPayload` | Successfully validated sensor telemetry |
+| `telemetry.rejected.v1` | `TelemetryRejectedPayload` | Failed validation with rejection reason |
+| `telemetry.pubsub.result.v1` | `TelemetryPubsubResultPayload` | PubSub broadcast result |
+| `telemetry.ipfs.result.v1` | `TelemetryIpfsPublishedPayload` | IPFS publish result with CID |
+| `telemetry.blockchain.result.v1` | `TelemetryBlockchainResultPayload` | Blockchain anchoring result |
+
+### Rejection Reason Codes
+
+When telemetry validation fails, the endpoint emits `telemetry.rejected.v1` events with one of these reason codes:
+
+| Code | Constant | Description |
+|------|----------|-------------|
+| 1 | `STALE_TIMESTAMP` | Timestamp is outside the allowed clock skew window |
+| 2 | `SENSOR_FORBIDDEN` | Sensor is not registered or has been disabled |
+| 3 | `DUPLICATE_NONCE` | Nonce has already been used (replay attack prevention) |
+| 4 | `INVALID_SIGNATURE` | Ed25519 signature verification failed |
+| 999 | `KAFKA_PUBLISH_FAILED` | Internal error: Kafka publish failed after retries |
+
+Use `REJECTION_CODES` from `@scp/contracts` to reference these codes in your code:
+
+```typescript
+import { REJECTION_CODES, getRejectionCodeDescription } from '@scp/contracts';
+
+// Check rejection reason
+if (payload.reasonCode === REJECTION_CODES.INVALID_SIGNATURE) {
+  console.error('Signature verification failed');
+}
+
+// Get human-readable description
+const description = getRejectionCodeDescription(payload.reasonCode);
+```
+
 
 ## Protocol assets
 

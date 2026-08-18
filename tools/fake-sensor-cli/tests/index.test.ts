@@ -75,7 +75,10 @@ describe('fake sensor CLI', () => {
     const signerSeedHex =
       '0x0000000000000000000000000000000000000000000000000000000000000001';
     const seed = Buffer.from(signerSeedHex.slice(2), 'hex');
-    const expectedSensorId = encodeAddress(ed25519PairFromSeed(seed).publicKey);
+    const expectedSensorId = encodeAddress(
+      ed25519PairFromSeed(seed).publicKey,
+      32
+    );
 
     const options = parseFakeSensorCliOptions([], {});
     expect(options).toEqual({
@@ -88,6 +91,14 @@ describe('fake sensor CLI', () => {
   });
 
   it('accepts cli args and env overrides', () => {
+    const signerSeedHex =
+      '0x0101010101010101010101010101010101010101010101010101010101010101';
+    const seed = Buffer.from(signerSeedHex.slice(2), 'hex');
+    const expectedSensorId = encodeAddress(
+      ed25519PairFromSeed(seed).publicKey,
+      32
+    );
+
     const options = parseFakeSensorCliOptions(
       [
         '--endpoint',
@@ -96,22 +107,19 @@ describe('fake sensor CLI', () => {
         '--sensor-zone',
         'eu-west',
         '--signer-seed-hex',
-        '0x0101010101010101010101010101010101010101010101010101010101010101',
+        signerSeedHex,
       ],
       {
-        SENSOR_FAKE_SENSOR_ID:
-          '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
         SENSOR_FAKE_INTERVAL_MS: '250',
       }
     );
 
     expect(options).toEqual({
       endpointUrl: 'http://localhost:4000/v1/telemetry',
-      sensorId: '5FCM8VvFKfKzQnmkT7X9kDY6xMcgeGYRK8tmSbfwpXyM1CvS',
+      sensorId: expectedSensorId,
       count: 3,
       intervalMs: 250,
-      signerSeedHex:
-        '0x0101010101010101010101010101010101010101010101010101010101010101',
+      signerSeedHex,
       sensorZone: 'eu-west',
     });
   });

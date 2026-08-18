@@ -3,6 +3,7 @@ packages:
   - "services/*"
   - "tools/*"
 allowBuilds:
+  '@bufbuild/buf': true
   esbuild: false
 minimumReleaseAgeExclude:
   - '@buf/airalab_sensors-social-proto.bufbuild_es@2.14.0-20260815104319-7f23b240b94d.1'

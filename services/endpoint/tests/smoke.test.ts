@@ -3,13 +3,10 @@ import {
   cryptoWaitReady,
   ed25519PairFromSeed,
   ed25519Sign,
-  encodeAddress,
 } from '@polkadot/util-crypto';
-import {
-  createSignedEnvelope,
-  toSignedEnvelopeBytes,
-  buildEnvelopeSigningBytes,
-} from '@scp/contracts';
+import { buildEnvelopeSigningBytes, REJECTION_CODES } from '@scp/contracts';
+import { create, toBinary } from '@bufbuild/protobuf';
+import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
 import { createEndpointApp } from '../src/index.js';
 import { InMemoryRegistryReader } from '@scp/registry-sync';
 
@@ -20,16 +17,28 @@ async function buildSignedEnvelopeBytes(
   await cryptoWaitReady();
   const seed = Uint8Array.from(Array.from({ length: 32 }, () => seedByte));
   const pair = ed25519PairFromSeed(seed);
-  const envelope = createSignedEnvelope({
+  const nonce = Uint8Array.from(Buffer.alloc(16, 1));
+  const message = Uint8Array.from(Buffer.from('payload'));
+
+  const signingBytes = buildEnvelopeSigningBytes({
     sensorId: pair.publicKey,
     timestamp,
-    nonce: Uint8Array.from(Buffer.alloc(16, 1)),
-    message: Uint8Array.from(Buffer.from('payload')),
+    nonce,
+    message,
   });
-  envelope.signature = ed25519Sign(buildEnvelopeSigningBytes(envelope), pair);
+  const signature = ed25519Sign(signingBytes, pair);
+
+  const envelope = create(SignedEnvelopeSchema, {
+    sensorId: pair.publicKey,
+    timestamp,
+    nonce,
+    message,
+    signature,
+  });
+
   return {
-    bytes: toSignedEnvelopeBytes(envelope),
-    sensorId: encodeAddress(pair.publicKey, 32),
+    bytes: toBinary(SignedEnvelopeSchema, envelope),
+    sensorId: pair.publicKey,
   };
 }
 
@@ -62,7 +71,9 @@ describe('endpoint smoke', () => {
     });
 
     expect(response.statusCode).toBe(403);
-    expect(rejectedEvents[0]?.reason_code).toBe('sensor_forbidden');
+    expect(rejectedEvents[0]?.reasonCode).toBe(
+      REJECTION_CODES.SENSOR_FORBIDDEN
+    );
     await app.close();
   });
 
@@ -101,7 +112,7 @@ describe('endpoint smoke', () => {
       status: 'rejected',
       error_code: 'stale_timestamp',
     });
-    expect(rejectedEvents[0]?.reason_code).toBe('stale_timestamp');
+    expect(rejectedEvents[0]?.reasonCode).toBe(REJECTION_CODES.STALE_TIMESTAMP);
     await app.close();
   });
 

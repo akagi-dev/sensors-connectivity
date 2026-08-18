@@ -4,9 +4,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fileURLToPath } from 'node:url';
 import type { TelemetryRejectedPayload, SignedEnvelope } from '@scp/contracts';
 import {
-  encodeBase64,
-  extractSensorId,
+  formatSensorId,
   validateSignedEnvelope,
+  REJECTION_CODES,
 } from '@scp/contracts';
 import {
   createRegistryReaderFromEnv,
@@ -31,10 +31,6 @@ export interface EndpointDeps {
 
 export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
-}
-
-function toHex(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('hex');
 }
 
 function parseSignedEnvelope(request: FastifyRequest): {
@@ -95,17 +91,11 @@ export function createEndpointApp(
       const traceId = request.headers['x-request-id']?.toString() ?? request.id;
       let parsedEnvelope: SignedEnvelope;
       let rawEnvelopeBytes: Uint8Array;
-      let sensorAddress: string;
-      let nonceHex: string;
-      let sensorHex: string;
 
       try {
         const parsed = parseSignedEnvelope(request);
         parsedEnvelope = parsed.envelope;
         rawEnvelopeBytes = parsed.rawBytes;
-        sensorAddress = extractSensorId(parsedEnvelope);
-        nonceHex = toHex(parsedEnvelope.nonce);
-        sensorHex = toHex(parsedEnvelope.sensorId);
       } catch (error) {
         metrics.rejected += 1;
         logWarn('telemetry rejected due to invalid envelope', {
@@ -124,15 +114,19 @@ export function createEndpointApp(
             logInfo('telemetry rejected event published', {
               event_id: eventId,
               trace_id: traceId,
-              sensor_id: payload.sensor_id,
-              reason_code: payload.reason_code,
+              sensor_id: payload.sensorId
+                ? formatSensorId(payload.sensorId)
+                : undefined,
+              reason_code: payload.reasonCode,
             });
           })
           .catch((error) => {
             logError('failed to publish rejected event', error, {
               trace_id: traceId,
-              sensor_id: payload.sensor_id,
-              reason_code: payload.reason_code,
+              sensor_id: payload.sensorId
+                ? formatSensorId(payload.sensorId)
+                : undefined,
+              reason_code: payload.reasonCode,
             });
           });
 
@@ -144,22 +138,24 @@ export function createEndpointApp(
       ) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_id: sensorAddress,
-          reason_code: 'stale_timestamp',
-          reason_message: 'Timestamp outside allowed skew window',
+          sensorId: parsedEnvelope.sensorId,
+          reasonCode: REJECTION_CODES.STALE_TIMESTAMP,
+          reasonMessage: 'Timestamp outside allowed skew window',
         });
         return reply
           .code(401)
           .send({ status: 'rejected', error_code: 'stale_timestamp' });
       }
 
-      const record = await deps.registryReader.getSensorRecord(sensorAddress);
+      const record = await deps.registryReader.getSensorRecord(
+        parsedEnvelope.sensorId
+      );
       if (!record || !record.enabled) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_id: sensorAddress,
-          reason_code: 'sensor_forbidden',
-          reason_message: 'Sensor is unknown or disabled',
+          sensorId: parsedEnvelope.sensorId,
+          reasonCode: REJECTION_CODES.SENSOR_FORBIDDEN,
+          reasonMessage: 'Sensor is unknown or disabled',
         });
         return reply
           .code(403)
@@ -167,15 +163,15 @@ export function createEndpointApp(
       }
 
       const nonceSeen = await deps.registryReader.isNonceSeen(
-        sensorHex,
-        nonceHex
+        parsedEnvelope.sensorId,
+        parsedEnvelope.nonce
       );
       if (nonceSeen) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_id: sensorAddress,
-          reason_code: 'duplicate_nonce',
-          reason_message: 'Nonce already used for this sensor',
+          sensorId: parsedEnvelope.sensorId,
+          reasonCode: REJECTION_CODES.DUPLICATE_NONCE,
+          reasonMessage: 'Nonce already used for this sensor',
         });
         return reply
           .code(409)
@@ -194,9 +190,9 @@ export function createEndpointApp(
       if (!signatureValid) {
         metrics.rejected += 1;
         publishRejectedEvent({
-          sensor_id: sensorAddress,
-          reason_code: 'invalid_signature',
-          reason_message: 'Signature verification failed',
+          sensorId: parsedEnvelope.sensorId,
+          reasonCode: REJECTION_CODES.INVALID_SIGNATURE,
+          reasonMessage: 'Signature verification failed',
         });
         return reply
           .code(401)
@@ -206,12 +202,8 @@ export function createEndpointApp(
       try {
         await deps.producer.publishAuthorized(
           {
-            sensor_id: encodeBase64(parsedEnvelope.sensorId),
-            timestamp: timestampMs,
-            nonce: encodeBase64(parsedEnvelope.nonce),
-            message: encodeBase64(parsedEnvelope.message),
-            signature: encodeBase64(parsedEnvelope.signature),
-            envelope: encodeBase64(rawEnvelopeBytes),
+            sensorId: parsedEnvelope.sensorId,
+            signedEnvelope: rawEnvelopeBytes,
           },
           traceId
         );
@@ -220,7 +212,7 @@ export function createEndpointApp(
         metrics.rejected += 1;
         logError('failed to publish authorized telemetry event', error, {
           trace_id: traceId,
-          sensor_id: sensorAddress,
+          sensor_id: formatSensorId(parsedEnvelope.sensorId),
         });
         return reply
           .code(503)
@@ -228,12 +220,15 @@ export function createEndpointApp(
       }
 
       try {
-        await deps.registryReader.rememberNonce(sensorHex, nonceHex);
+        await deps.registryReader.rememberNonce(
+          parsedEnvelope.sensorId,
+          parsedEnvelope.nonce
+        );
       } catch (error) {
         metrics.rejected += 1;
         logError('failed to remember sensor nonce', error, {
           trace_id: traceId,
-          sensor_id: sensorAddress,
+          sensor_id: formatSensorId(parsedEnvelope.sensorId),
         });
         return reply
           .code(503)
