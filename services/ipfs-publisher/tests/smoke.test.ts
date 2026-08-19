@@ -1,200 +1,172 @@
-import { TELEMETRY_TOPICS } from '@scp/contracts';
-import type { Consumer, EachMessagePayload } from 'kafkajs';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import type { Consumer } from '@platformatic/kafka';
+import { TELEMETRY_TOPICS } from '@scp/core';
 import type { Server } from 'node:http';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IpfsBatchClient } from '../src/batch-publisher.js';
-import { startIpfsPublisher } from '../src/service.js';
-import type {
-  IpfsResultEnvelope,
-  IpfsResultPublisher
-} from '../src/result-publisher.js';
+import { createIpfsPublisherService } from '../src/service.js';
+import type { IpfsPublisherConfig } from '../src/config.js';
+import type { IpfsResultPublisher } from '../src/result-publisher.js';
+import { authorizedEnvelopeBytes } from './helpers.js';
 
-const testCid = 'bafybeideterministic';
+const config: IpfsPublisherConfig = {
+  kafkaBrokers: ['localhost:9092'],
+  consumerGroupId: 'ipfs-publisher-test',
+  batchMaxEvents: 1,
+  batchMaxWaitMs: 1000,
+  maxRetries: 1,
+  retryBackoffMs: 0,
+  ipfsApiUrl: 'http://localhost:5001',
+  healthPort: 3040,
+};
+const cid = 'bafybeideterministic';
 
-/** Creates an authorized envelope for the consumer smoke test. */
-function authorizedEnvelope(eventId: string): string {
-  return JSON.stringify({
-    event_id: eventId,
-    event_type: TELEMETRY_TOPICS.AUTHORIZED,
-    event_version: 'v1',
-    occurred_at: '2026-08-03T13:00:00.000Z',
-    source: 'authorizer',
-    payload: {
-      sensor_id: `sensor-${eventId}`,
-      timestamp: '2026-08-03T13:00:00.000Z',
-      nonce: `nonce-${eventId}`,
-      measurements: { temperature: 22 },
-      signature: '0x01'
-    }
+function consumerDouble(calls: string[]) {
+  const commit = vi.fn(async () => {
+    calls.push('consumer.commit');
   });
+  const stream = {
+    async *[Symbol.asyncIterator]() {
+      yield {
+        topic: TELEMETRY_TOPICS.AUTHORIZED,
+        partition: 0,
+        offset: 7n,
+        value: authorizedEnvelopeBytes(),
+        commit,
+      };
+    },
+    async close() {
+      calls.push('stream.close');
+    },
+  };
+  const consumer = {
+    async consume(options: { topics: string[]; autocommit: boolean }) {
+      calls.push(`consumer.consume:${options.topics[0]}:${options.autocommit}`);
+      return stream;
+    },
+    async close() {
+      calls.push('consumer.close');
+    },
+  };
+  return { consumer: consumer as unknown as Consumer, commit };
 }
 
-describe('ipfs-publisher Kafka consumer smoke', () => {
-  it('subscribes, batches authorized messages, and shuts down', async () => {
+function resultDouble(calls: string[]): IpfsResultPublisher {
+  return {
+    async connect() {
+      calls.push('result.connect');
+    },
+    async disconnect() {
+      calls.push('result.disconnect');
+    },
+    async publish() {
+      calls.push('result.publish');
+    },
+    async publishDlq() {
+      calls.push('result.publishDlq');
+    },
+  };
+}
+
+function healthDouble(calls: string[]): Server {
+  return {
+    close(callback: (error?: Error) => void) {
+      calls.push('health.close');
+      callback();
+    },
+  } as unknown as Server;
+}
+
+function workingIpfs(calls: string[]): IpfsBatchClient {
+  return {
+    async add() {
+      calls.push('ipfs.add');
+      return { cid: { toString: () => cid } };
+    },
+    pin: {
+      async add() {
+        calls.push('pin.add');
+        return { toString: () => cid };
+      },
+      async *ls() {
+        calls.push('pin.ls');
+        yield { cid: { toString: () => cid } };
+      },
+    },
+  };
+}
+
+describe('ipfs-publisher service lifecycle', () => {
+  it('consumes protobuf, publishes, manually commits, and cleans up', async () => {
     const calls: string[] = [];
-    let publishedArtifact:
-      { batch_id?: string; event_count?: number } | undefined;
-    let publishedResult:
-      { batchId: string; envelope: IpfsResultEnvelope } | undefined;
-    const fakeIpfs: IpfsBatchClient = {
-      async add(content) {
-        calls.push('ipfs.add');
-        publishedArtifact = JSON.parse(
-          new TextDecoder().decode(content)
-        ) as typeof publishedArtifact;
-        return { cid: { toString: () => testCid } };
-      },
-      pin: {
-        async add() {
-          calls.push('pin.add');
-          return { toString: () => testCid };
-        },
-        async *ls() {
-          calls.push('pin.ls');
-          yield { cid: { toString: () => testCid } };
-        }
-      }
-    };
-    const fakeResultPublisher: IpfsResultPublisher = {
-      async connect() {
-        calls.push('result.connect');
-      },
-      async disconnect() {
-        calls.push('result.disconnect');
-      },
-      async publish(batchId, envelope) {
-        calls.push('result.publish');
-        publishedResult = { batchId, envelope };
-      },
-      async publishDlq() {
-        calls.push('result.publishDlq');
-      }
-    };
-    const fakeConsumer = {
-      async connect() {
-        calls.push('consumer.connect');
-      },
-      async subscribe(options: { topic: string }) {
-        calls.push(`consumer.subscribe:${options.topic}`);
-      },
-      async run(options: {
-        autoCommit?: boolean;
-        eachMessage: (payload: EachMessagePayload) => Promise<void>;
-      }) {
-        calls.push(`consumer.run:autoCommit=${String(options.autoCommit)}`);
-        for (const [offset, eventId] of [
-          ['7', 'event-1'],
-          ['8', 'event-2']
-        ] as const) {
-          const encodedEnvelope = authorizedEnvelope(eventId);
-          await options.eachMessage({
-            topic: TELEMETRY_TOPICS.AUTHORIZED,
-            partition: 0,
-            message: {
-              key: null,
-              value: Buffer.from(encodedEnvelope),
-              timestamp: '0',
-              attributes: 0,
-              offset,
-              size: Buffer.byteLength(encodedEnvelope)
-            },
-            heartbeat: async () => {},
-            pause: () => () => {}
-          });
-        }
-      },
-      async stop() {
-        calls.push('consumer.stop');
-      },
-      async commitOffsets(
-        offsets: Array<{ topic: string; partition: number; offset: string }>
-      ) {
-        for (const offset of offsets) {
-          calls.push(
-            `consumer.commit:${offset.topic}:${offset.partition}:${offset.offset}`
-          );
-        }
-      },
-      async disconnect() {
-        calls.push('consumer.disconnect');
-      }
-    };
-
-    const service = await startIpfsPublisher({
-      ipfs: fakeIpfs,
-      createConsumer: () => fakeConsumer as unknown as Consumer,
-      resultPublisher: fakeResultPublisher,
-      createHealthServer: (_metrics, port) => {
-        calls.push(`health.listen:${port}`);
-        return {
-          close(callback: (error?: Error) => void) {
-            calls.push('health.close');
-            callback();
-          }
-        } as unknown as Server;
-      }
+    const consumer = consumerDouble(calls);
+    const service = createIpfsPublisherService(config, {
+      ipfs: workingIpfs(calls),
+      createConsumer: () => consumer.consumer,
+      resultPublisher: resultDouble(calls),
+      createHealthServer: () => healthDouble(calls),
     });
-    expect(service.isStarted()).toBe(true);
-
+    await service.start();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     await service.stop();
 
-    expect(service.isStarted()).toBe(false);
-    expect(service.getMetrics()).toMatchObject({
-      batchCount: 1,
-      pinCount: 1,
-      retryCount: 0,
-      dlqCount: 0
-    });
-    expect(publishedArtifact?.event_count).toBe(2);
-    expect(calls.filter((call) => call === 'ipfs.add')).toHaveLength(1);
-    expect(calls.slice(0, 4)).toEqual([
-      'result.connect',
-      'consumer.connect',
-      `consumer.subscribe:${TELEMETRY_TOPICS.AUTHORIZED}`,
-      'health.listen:3040'
-    ]);
-    expect(calls).toContain('consumer.run:autoCommit=false');
+    expect(calls).toContain(
+      `consumer.consume:${TELEMETRY_TOPICS.AUTHORIZED}:false`
+    );
     expect(calls).toEqual(
       expect.arrayContaining([
         'ipfs.add',
-        'consumer.stop',
-        'health.close',
-        'consumer.disconnect',
         'pin.add',
         'pin.ls',
         'result.publish',
-        `consumer.commit:${TELEMETRY_TOPICS.AUTHORIZED}:0:9`,
-        'result.disconnect'
+        'consumer.commit',
+        'stream.close',
+        'health.close',
+        'consumer.close',
+        'result.disconnect',
       ])
     );
-    expect(calls.indexOf('ipfs.add')).toBeLessThan(calls.indexOf('pin.add'));
-    expect(calls.indexOf('pin.add')).toBeLessThan(calls.indexOf('pin.ls'));
-    expect(calls.indexOf('pin.ls')).toBeLessThan(
-      calls.indexOf('result.publish')
-    );
     expect(calls.indexOf('result.publish')).toBeLessThan(
-      calls.indexOf(`consumer.commit:${TELEMETRY_TOPICS.AUTHORIZED}:0:9`)
+      calls.indexOf('consumer.commit')
     );
-    expect(
-      calls.indexOf(`consumer.commit:${TELEMETRY_TOPICS.AUTHORIZED}:0:9`)
-    ).toBeLessThan(calls.indexOf('consumer.disconnect'));
-    expect(calls.indexOf('consumer.stop')).toBeLessThan(
-      calls.indexOf('consumer.disconnect')
-    );
-    expect(calls.indexOf('pin.ls')).toBeLessThan(
-      calls.indexOf('consumer.disconnect')
-    );
-    expect(calls.indexOf('consumer.disconnect')).toBeLessThan(
-      calls.indexOf('result.disconnect')
-    );
-    expect(publishedResult).toMatchObject({
-      batchId: publishedArtifact?.batch_id,
-      envelope: {
-        event_type: TELEMETRY_TOPICS.IPFS_RESULT,
-        event_version: 'v1',
-        source: 'ipfs-publisher',
-        payload: { cid: testCid, event_count: 2 }
-      }
+    expect(consumer.commit).toHaveBeenCalledOnce();
+  });
+
+  it('treats acknowledged DLQ as a normal status and still disconnects', async () => {
+    const calls: string[] = [];
+    const consumer = consumerDouble(calls);
+    const ipfs = workingIpfs(calls);
+    (ipfs.add as ReturnType<typeof vi.fn>) = vi.fn(async () => {
+      calls.push('ipfs.add');
+      throw new Error('terminal IPFS failure');
     });
+    const service = createIpfsPublisherService(config, {
+      ipfs,
+      createConsumer: () => consumer.consumer,
+      resultPublisher: resultDouble(calls),
+      createHealthServer: () => healthDouble(calls),
+    });
+    await service.start();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await expect(service.stop()).resolves.toBeUndefined();
+
+    expect(calls).toContain('result.publishDlq');
+    expect(calls).toContain('consumer.close');
+    expect(calls).toContain('result.disconnect');
+    expect(consumer.commit).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@
     { "path": "./packages/core" },
     { "path": "./services/endpoint" },
     { "path": "./services/heartbeat-tracker" },
+    { "path": "./services/ipfs-publisher" },
     { "path": "./services/pubsub-broadcaster" },
     { "path": "./services/registry-sync" },
     { "path": "./services/whitelist" },

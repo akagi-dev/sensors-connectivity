@@ -1,75 +1,77 @@
-import { TELEMETRY_TOPICS } from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { create, toBinary } from '@bufbuild/protobuf';
+import {
+  EnvelopeSchema,
+  TELEMETRY_TOPICS,
+  TelemetryAuthorizedPayloadSchema,
+} from '@scp/core';
 import { describe, expect, it } from 'vitest';
-import { decodeAuthorizedKafkaMessage } from '../src/authorized-message.js';
-
-/** Builds a minimal authorized envelope JSON string for decoder tests. */
-function authorizedEnvelopeJson(): string {
-  return JSON.stringify({
-    event_id: 'event-1',
-    event_type: TELEMETRY_TOPICS.AUTHORIZED,
-    event_version: 'v1',
-    occurred_at: '2026-08-03T13:00:00.000Z',
-    source: 'authorizer',
-    payload: {
-      sensor_id: 'sensor-1',
-      timestamp: '2026-08-03T13:00:00.000Z',
-      nonce: 'nonce-1',
-      measurements: { temperature: 22 },
-      signature: '0x01'
-    }
-  });
-}
+import {
+  decodeAuthorizedKafkaEnvelope,
+  decodeAuthorizedKafkaMessage,
+} from '../src/authorized-message.js';
+import { authorizedEnvelopeBytes, authorizedPayload } from './helpers.js';
 
 describe('authorized Kafka message decoder', () => {
-  it('extracts the authorized payload', () => {
+  it('decodes the current protobuf envelope and payload', () => {
+    const decoded = decodeAuthorizedKafkaEnvelope(authorizedEnvelopeBytes());
+    expect(decoded.eventId).toBe('event-1');
+    expect(decoded.eventType).toBe(TELEMETRY_TOPICS.AUTHORIZED);
     expect(
-      decodeAuthorizedKafkaMessage(authorizedEnvelopeJson())
-    ).toMatchObject({
-      sensor_id: 'sensor-1',
-      nonce: 'nonce-1'
+      decodeAuthorizedKafkaMessage(authorizedEnvelopeBytes()).sensorId
+    ).toEqual(Buffer.alloc(32, 1));
+  });
+
+  it('rejects malformed protobuf and unsupported event types', () => {
+    expect(() =>
+      decodeAuthorizedKafkaMessage(Buffer.from('not-protobuf'))
+    ).toThrow('not a valid protobuf envelope');
+    const envelope = create(EnvelopeSchema, {
+      eventId: 'event-2',
+      eventType: TELEMETRY_TOPICS.REJECTED,
+      eventVersion: 'v1',
+      occurredAt: '2026-08-11T00:00:00.000Z',
+      source: 'endpoint',
+      payload: toBinary(TelemetryAuthorizedPayloadSchema, authorizedPayload()),
     });
-  });
-
-  it('rejects invalid JSON', () => {
-    expect(() => decodeAuthorizedKafkaMessage('not-json')).toThrow(
-      'not valid JSON'
-    );
-  });
-
-  it('rejects envelopes that do not match the WP-00 schema', () => {
     expect(() =>
-      decodeAuthorizedKafkaMessage(
-        JSON.stringify({
-          event_type: TELEMETRY_TOPICS.AUTHORIZED,
-          payload: {}
-        })
-      )
-    ).toThrow('does not match WP-00 envelope/payload schemas');
-  });
-
-  it('rejects authorized payloads that do not match the WP-00 schema', () => {
-    const envelope = JSON.parse(authorizedEnvelopeJson()) as {
-      payload: Record<string, unknown>;
-    };
-    envelope.payload.measurements = 'invalid';
-
-    expect(() =>
-      decodeAuthorizedKafkaMessage(JSON.stringify(envelope))
-    ).toThrow('does not match WP-00 envelope/payload schemas');
-  });
-
-  it('rejects valid envelopes for unsupported event types', () => {
-    expect(() =>
-      decodeAuthorizedKafkaMessage(
-        JSON.stringify({
-          event_id: 'event-2',
-          event_type: TELEMETRY_TOPICS.REJECTED,
-          event_version: 'v1',
-          occurred_at: '2026-08-03T13:00:00.000Z',
-          source: 'authorizer',
-          payload: { reason_code: 'invalid_signature' }
-        })
-      )
+      decodeAuthorizedKafkaMessage(toBinary(EnvelopeSchema, envelope))
     ).toThrow('unsupported event_type');
+  });
+
+  it('rejects empty IDs and invalid current payload fields', () => {
+    const payload = create(TelemetryAuthorizedPayloadSchema, {
+      sensorId: Buffer.alloc(31),
+      signedEnvelope: Buffer.from([1]),
+    });
+    const envelope = create(EnvelopeSchema, {
+      eventId: '',
+      eventType: TELEMETRY_TOPICS.AUTHORIZED,
+      eventVersion: 'v1',
+      occurredAt: '2026-08-11T00:00:00.000Z',
+      source: 'endpoint',
+      payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
+    });
+    expect(() =>
+      decodeAuthorizedKafkaMessage(toBinary(EnvelopeSchema, envelope))
+    ).toThrow('empty event_id');
+    envelope.eventId = 'event-3';
+    expect(() =>
+      decodeAuthorizedKafkaMessage(toBinary(EnvelopeSchema, envelope))
+    ).toThrow('32 bytes');
   });
 });

@@ -1,122 +1,86 @@
-import { TELEMETRY_TOPICS } from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { TELEMETRY_TOPICS } from '@scp/core';
 import { describe, expect, it } from 'vitest';
 import {
   AuthorizedBatchAccumulator,
   deriveAuthorizedBatchId,
   type AuthorizedBatchEntry,
-  type AuthorizedTelemetryEnvelope
 } from '../src/batching.js';
+import { authorizedEnvelope } from './helpers.js';
 
-/** Creates a valid authorized Kafka entry for batching tests. */
 function entry(
   offset: string,
   eventId: string,
   partition = 0
 ): AuthorizedBatchEntry {
-  const envelope: AuthorizedTelemetryEnvelope = {
-    event_id: eventId,
-    event_type: TELEMETRY_TOPICS.AUTHORIZED,
-    event_version: 'v1',
-    occurred_at: '2026-08-04T12:00:00.000Z',
-    source: 'authorizer',
-    payload: {
-      sensor_id: `sensor-${eventId}`,
-      timestamp: '2026-08-04T12:00:00.000Z',
-      nonce: `nonce-${eventId}`,
-      measurements: { temperature: 22 },
-      signature: '0x01'
-    }
-  };
   return {
     topic: TELEMETRY_TOPICS.AUTHORIZED,
     partition,
     offset,
-    envelope
+    envelope: authorizedEnvelope(eventId, Number(offset) || 1),
   };
 }
 
-describe('authorized batch ID derivation', () => {
-  it('is stable for an identical closed batch', () => {
+describe('authorized batch identity and accumulation', () => {
+  it('derives a stable ID without losing 64-bit offsets', () => {
     const context = {
       topic: TELEMETRY_TOPICS.AUTHORIZED,
       partition: 2,
       entries: [
         { offset: '9007199254740993', eventId: 'event-1' },
-        { offset: '9007199254740994', eventId: 'event-2' }
-      ]
+        { offset: '9007199254740994', eventId: 'event-2' },
+      ],
     };
-
     expect(deriveAuthorizedBatchId(context)).toBe(
       deriveAuthorizedBatchId(structuredClone(context))
     );
   });
 
-  it('changes when Kafka position or event identity changes', () => {
-    const first = {
-      topic: TELEMETRY_TOPICS.AUTHORIZED,
-      partition: 0,
-      entries: [{ offset: '1', eventId: 'event-1' }]
-    };
-
-    expect(
-      deriveAuthorizedBatchId({
-        ...first,
-        partition: 1
-      })
-    ).not.toBe(deriveAuthorizedBatchId(first));
-    expect(
-      deriveAuthorizedBatchId({
-        ...first,
-        entries: [{ offset: '1', eventId: 'event-2' }]
-      })
-    ).not.toBe(deriveAuthorizedBatchId(first));
-  });
-});
-
-describe('authorized batch accumulator', () => {
-  it('seals per-partition batches at the maximum event count', () => {
+  it('sorts and seals batches independently per partition', () => {
     const accumulator = new AuthorizedBatchAccumulator({
       maxEvents: 2,
-      maxWaitMs: 1_000
+      maxWaitMs: 100,
     });
-
     expect(accumulator.add(entry('2', 'event-2'), 0)).toBeUndefined();
     const sealed = accumulator.add(entry('1', 'event-1'), 1);
-
-    expect(sealed).toMatchObject({
-      partition: 0,
-      firstOffset: '1',
-      lastOffset: '2'
-    });
-    expect(sealed?.entries.map((current) => current.offset)).toEqual([
-      '1',
-      '2'
-    ]);
-    expect(Object.isFrozen(sealed?.entries)).toBe(true);
-    expect(accumulator.getBufferedEventCount()).toBe(0);
-  });
-
-  it('keeps partitions independent and flushes batches after max wait', () => {
-    const accumulator = new AuthorizedBatchAccumulator({
-      maxEvents: 10,
-      maxWaitMs: 100
-    });
-    accumulator.add(entry('1', 'event-1', 0), 1_000);
-    accumulator.add(entry('5', 'event-5', 1), 1_050);
-
-    expect(accumulator.flushExpired(1_099)).toEqual([]);
+    expect(sealed?.entries.map((item) => item.offset)).toEqual(['1', '2']);
+    accumulator.add(entry('5', 'event-5', 1), 1_000);
     expect(accumulator.flushExpired(1_100)).toHaveLength(1);
-    expect(accumulator.getBufferedEventCount()).toBe(1);
-    expect(accumulator.flushAll()).toHaveLength(1);
   });
 
-  it('rejects duplicate offsets within an open partition batch', () => {
+  it('preserves the manual commit callback while cloning binary payloads', () => {
+    const commitOffset = async (): Promise<void> => {};
+    const accumulator = new AuthorizedBatchAccumulator({
+      maxEvents: 1,
+      maxWaitMs: 100,
+    });
+    const sealed = accumulator.add({ ...entry('1', 'event-1'), commitOffset });
+    expect(sealed?.entries[0]?.commitOffset).toBe(commitOffset);
+    expect(sealed?.entries[0]?.envelope.payload.sensorId).not.toBe(
+      entry('1', 'event-1').envelope.payload.sensorId
+    );
+  });
+
+  it('rejects duplicate offsets in an open partition', () => {
     const accumulator = new AuthorizedBatchAccumulator({
       maxEvents: 3,
-      maxWaitMs: 100
+      maxWaitMs: 100,
     });
     accumulator.add(entry('1', 'event-1'));
-
     expect(() => accumulator.add(entry('1', 'event-2'))).toThrow(
       'Duplicate Kafka offset'
     );

@@ -1,90 +1,80 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { fromBinary } from '@bufbuild/protobuf';
+import type { Producer } from '@platformatic/kafka';
 import {
-  parseEnvelopeWithKnownPayload,
-  TELEMETRY_TOPICS
-} from '@scp/contracts';
-import type { Producer } from 'kafkajs';
+  EnvelopeSchema,
+  TELEMETRY_TOPICS,
+  TelemetryIpfsPublishedPayloadSchema,
+} from '@scp/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildIpfsDlqEnvelope,
   buildIpfsResultEnvelope,
-  createKafkaIpfsResultPublisher
+  createKafkaIpfsResultPublisher,
 } from '../src/result-publisher.js';
 
 describe('IPFS Kafka result publisher', () => {
-  it('builds a WP-00 compatible result envelope', () => {
-    const envelope = buildIpfsResultEnvelope('bafy-result', 2, {
+  it('builds the current protobuf result envelope', () => {
+    const result = buildIpfsResultEnvelope('bafy-result', 2, {
       eventId: 'result-event-1',
-      occurredAt: '2026-08-11T00:00:00.000Z'
+      occurredAt: '2026-08-11T00:00:00.000Z',
     });
-
-    expect(parseEnvelopeWithKnownPayload(envelope)).toEqual(envelope);
-    expect(envelope).toEqual({
-      event_id: 'result-event-1',
-      event_type: TELEMETRY_TOPICS.IPFS_RESULT,
-      event_version: 'v1',
-      occurred_at: '2026-08-11T00:00:00.000Z',
+    expect(result.envelope).toMatchObject({
+      eventId: 'result-event-1',
+      eventType: TELEMETRY_TOPICS.IPFS_PUBLISHED,
+      eventVersion: 'v1',
       source: 'ipfs-publisher',
-      payload: { cid: 'bafy-result', event_count: 2 }
     });
+    expect(new TextDecoder().decode(result.payload.cid)).toBe('bafy-result');
+    expect(result.payload.eventCount).toBe(2);
+    expect(
+      fromBinary(TelemetryIpfsPublishedPayloadSchema, result.envelope.payload)
+    ).toEqual(result.payload);
   });
 
-  it('publishes the envelope with batch_id as Kafka key and waits for send', async () => {
-    const connect = vi.fn(async () => undefined);
-    const disconnect = vi.fn(async () => undefined);
-    const send = vi.fn(async () => []);
+  it('publishes protobuf bytes with batch_id as the Kafka key', async () => {
+    const send = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
     const publisher = createKafkaIpfsResultPublisher({
-      connect,
-      disconnect,
-      send
+      send,
+      close,
     } as unknown as Producer);
-    const envelope = buildIpfsResultEnvelope('bafy-result', 2, {
-      eventId: 'result-event-1',
-      occurredAt: '2026-08-11T00:00:00.000Z'
+    const result = buildIpfsResultEnvelope('bafy-result', 2);
+    await publisher.publish('batch-v1-result', result);
+    const message = send.mock.calls[0]![0].messages[0]!;
+    expect(message.topic).toBe(TELEMETRY_TOPICS.IPFS_PUBLISHED);
+    expect(message.key).toEqual(Buffer.from('batch-v1-result'));
+    const decoded = fromBinary(EnvelopeSchema, message.value);
+    expect(decoded).toMatchObject({
+      eventId: result.envelope.eventId,
+      eventType: TELEMETRY_TOPICS.IPFS_PUBLISHED,
     });
-
-    await publisher.connect();
-    await publisher.publish('batch-v1-result', envelope);
+    expect([...decoded.payload]).toEqual([...result.envelope.payload]);
     await publisher.disconnect();
-
-    expect(connect).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith({
-      topic: TELEMETRY_TOPICS.IPFS_RESULT,
-      messages: [
-        {
-          key: 'batch-v1-result',
-          value: JSON.stringify(envelope)
-        }
-      ]
-    });
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledOnce();
   });
 
-  it('propagates a Kafka send failure to the processing rule', async () => {
-    const send = vi.fn(async () => {
-      throw new Error('Kafka unavailable');
-    });
+  it('publishes detailed DLQ context inside a protobuf envelope', async () => {
+    const send = vi.fn(async () => undefined);
     const publisher = createKafkaIpfsResultPublisher({
-      connect: vi.fn(async () => undefined),
-      disconnect: vi.fn(async () => undefined),
-      send
+      send,
+      close: vi.fn(async () => undefined),
     } as unknown as Producer);
-
-    await expect(
-      publisher.publish(
-        'batch-v1-result',
-        buildIpfsResultEnvelope('bafy-result', 1)
-      )
-    ).rejects.toThrow('Kafka unavailable');
-  });
-
-  it('publishes an exhausted batch to DLQ with failure context', async () => {
-    const send = vi.fn(async () => []);
-    const publisher = createKafkaIpfsResultPublisher({
-      connect: vi.fn(async () => undefined),
-      disconnect: vi.fn(async () => undefined),
-      send
-    } as unknown as Producer);
-    const envelope = buildIpfsDlqEnvelope(
+    const dlq = buildIpfsDlqEnvelope(
       { batch_id: 'batch-v1-failed', events: [] },
       'ipfs_publish_or_pin_failed',
       'fetch failed',
@@ -94,24 +84,16 @@ describe('IPFS Kafka result publisher', () => {
         eventId: 'batch-v1-failed',
         attempt: 3,
         maxAttempts: 3,
-        failedAt: '2026-08-11T00:00:00.000Z'
-      },
-      {
-        eventId: 'dlq-event-1',
-        occurredAt: '2026-08-11T00:00:01.000Z'
+        failedAt: '2026-08-11T00:00:00.000Z',
       }
     );
-
-    await publisher.publishDlq('batch-v1-failed', envelope);
-
-    expect(send).toHaveBeenCalledWith({
-      topic: TELEMETRY_TOPICS.DLQ,
-      messages: [
-        {
-          key: 'batch-v1-failed',
-          value: JSON.stringify(envelope)
-        }
-      ]
-    });
+    await publisher.publishDlq('batch-v1-failed', dlq);
+    const message = send.mock.calls[0]![0].messages[0]!;
+    expect(message.topic).toBe(TELEMETRY_TOPICS.DLQ);
+    const decoded = fromBinary(EnvelopeSchema, message.value);
+    expect(decoded.eventType).toBe(TELEMETRY_TOPICS.DLQ);
+    expect(JSON.parse(new TextDecoder().decode(decoded.payload))).toEqual(
+      dlq.payload
+    );
   });
 });

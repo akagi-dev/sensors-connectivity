@@ -9,12 +9,12 @@
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "test": "echo notest",
+    "test": "vitest run",
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
     "@platformatic/kafka": "^2.9.0",
-    "@scp/contracts": "workspace:*",
+    "@scp/core": "workspace:*",
     "json-canonicalize": "^1.1.1",
     "kubo-rpc-client": "^4.1.1",
     "pino": "^10.3.1"

@@ -1,3 +1,18 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 export interface IpfsPublisherConfig {
   kafkaBrokers: string[];
   consumerGroupId: string;
@@ -9,7 +24,6 @@ export interface IpfsPublisherConfig {
   healthPort: number;
 }
 
-/** Reads a positive integer from an optional environment variable. */
 function parsePositiveInteger(
   value: string | undefined,
   fallback: number,
@@ -22,7 +36,6 @@ function parsePositiveInteger(
   return parsed;
 }
 
-/** Reads a non-negative integer from an optional environment variable. */
 function parseNonNegativeInteger(
   value: string | undefined,
   fallback: number,
@@ -35,15 +48,36 @@ function parseNonNegativeInteger(
   return parsed;
 }
 
+function parseNonEmptyString(
+  value: string | undefined,
+  fallback: string,
+  name: string
+): string {
+  const parsed = (value ?? fallback).trim();
+  if (parsed.length === 0) {
+    throw new Error(`${name} must not be empty`);
+  }
+  return parsed;
+}
+
 export function loadIpfsPublisherConfig(
   env: NodeJS.ProcessEnv = process.env
 ): IpfsPublisherConfig {
+  const kafkaBrokers = (env.KAFKA_BROKERS ?? 'localhost:9092')
+    .split(',')
+    .map((broker) => broker.trim())
+    .filter((broker) => broker.length > 0);
+  if (kafkaBrokers.length === 0) {
+    throw new Error('KAFKA_BROKERS must contain at least one broker');
+  }
+
   return {
-    kafkaBrokers: (env.KAFKA_BROKERS ?? 'localhost:9092')
-      .split(',')
-      .map((broker) => broker.trim())
-      .filter((broker) => broker.length > 0),
-    consumerGroupId: env.IPFS_PUBLISHER_GROUP_ID ?? 'ipfs-publisher-v1',
+    kafkaBrokers,
+    consumerGroupId: parseNonEmptyString(
+      env.IPFS_PUBLISHER_GROUP_ID,
+      'ipfs-publisher-v1',
+      'IPFS_PUBLISHER_GROUP_ID'
+    ),
     batchMaxEvents: parsePositiveInteger(
       env.IPFS_PUBLISHER_BATCH_MAX_EVENTS,
       100,
@@ -64,11 +98,15 @@ export function loadIpfsPublisherConfig(
       250,
       'IPFS_PUBLISHER_RETRY_BACKOFF_MS'
     ),
-    ipfsApiUrl: env.IPFS_API_URL ?? 'http://localhost:5001',
+    ipfsApiUrl: parseNonEmptyString(
+      env.IPFS_API_URL,
+      'http://localhost:5001',
+      'IPFS_API_URL'
+    ),
     healthPort: parsePositiveInteger(
       env.IPFS_PUBLISHER_HEALTH_PORT,
       3_040,
       'IPFS_PUBLISHER_HEALTH_PORT'
-    )
+    ),
   };
 }

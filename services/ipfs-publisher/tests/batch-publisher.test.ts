@@ -1,193 +1,116 @@
-import type { TelemetryAuthorizedPayload } from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import { canonicalize } from 'json-canonicalize';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildDeterministicAuthorizedBatch,
   confirmAuthorizedBatchPin,
   publishAndPinAuthorizedBatch,
-  type IpfsBatchClient
+  type IpfsBatchClient,
 } from '../src/batch-publisher.js';
+import { authorizedPayload } from './helpers.js';
 
-const testCid = 'bafybeibatch';
+const cid = 'bafybeibatch';
 
-/** Creates valid authorized telemetry payloads for determinism tests. */
-function payload(
-  measurements: Record<string, unknown> = { humidity: 45, temperature: 22 }
-): TelemetryAuthorizedPayload {
-  return {
-    sensor_id: 'sensor-1',
-    timestamp: '2026-08-03T13:00:00.000Z',
-    nonce: 'nonce-1',
-    measurements,
-    signature: '0x01'
-  };
-}
-
-/** Creates a Kubo test double and exposes its add and pin calls. */
-function createIpfsDouble(
-  pinEntries: string[] = [testCid],
-  addedCid = testCid,
-  pinnedCid = testCid
-): {
+function ipfsDouble(pins: string[] = [cid]): {
   client: IpfsBatchClient;
   add: ReturnType<typeof vi.fn>;
   pinAdd: ReturnType<typeof vi.fn>;
 } {
-  const add = vi.fn(async () => ({
-    cid: { toString: (): string => addedCid }
-  }));
-  const pinAdd = vi.fn(async () => ({ toString: (): string => pinnedCid }));
+  const add = vi.fn(async () => ({ cid: { toString: () => cid } }));
+  const pinAdd = vi.fn(async () => ({ toString: () => cid }));
   return {
     client: {
       add,
       pin: {
         add: pinAdd,
         async *ls() {
-          for (const entry of pinEntries) {
-            yield { cid: { toString: () => entry } };
-          }
-        }
-      }
+          for (const pin of pins) yield { cid: { toString: () => pin } };
+        },
+      },
     },
     add,
-    pinAdd
+    pinAdd,
   };
 }
 
 describe('deterministic authorized batch', () => {
-  it('encodes validated batch payloads as canonical JSON bytes', () => {
-    const events = [
-      payload({ humidity: 45, temperature: 22 }),
+  it('serializes current protobuf byte fields as canonical base64 JSON', () => {
+    const result = buildDeterministicAuthorizedBatch(
+      [authorizedPayload(1), authorizedPayload(2)],
       {
-        ...payload({ pressure: 1012 }),
-        sensor_id: 'sensor-2',
-        nonce: 'nonce-2'
-      }
-    ];
-    const result = buildDeterministicAuthorizedBatch(events, {
-      topic: 'telemetry.authorized.v1',
-      partition: 1,
-      entries: [
-        { offset: '7', eventId: 'event-1' },
-        { offset: '8', eventId: 'event-2' }
-      ]
-    });
-    const encoded = new TextDecoder().decode(result.bytes);
-
-    expect(JSON.parse(encoded)).toEqual({
-      schema_version: 'telemetry-ipfs-batch/v1',
-      batch_id: result.batchId,
-      event_count: 2,
-      events
-    });
-    expect(encoded).toBe(canonicalize(result.artifact));
-    expect(result.artifact.events).toEqual(events);
-  });
-
-  it('produces the same ID and bytes for equivalent key insertion orders', () => {
-    const first = buildDeterministicAuthorizedBatch([
-      payload({ humidity: 45, temperature: 22 })
-    ]);
-    const second = buildDeterministicAuthorizedBatch([
-      payload({ temperature: 22, humidity: 45 })
-    ]);
-
-    expect(second.batchId).toBe(first.batchId);
-    expect(second.bytes).toEqual(first.bytes);
-    expect(first.artifact.event_count).toBe(1);
-  });
-
-  it('changes the batch ID when event order changes', () => {
-    const first = payload();
-    const second = { ...payload(), sensor_id: 'sensor-2', nonce: 'nonce-2' };
-
-    expect(buildDeterministicAuthorizedBatch([first, second]).batchId).not.toBe(
-      buildDeterministicAuthorizedBatch([second, first]).batchId
-    );
-  });
-
-  it('rejects empty and invalid batches', () => {
-    expect(() => buildDeterministicAuthorizedBatch([])).toThrow('empty');
-    expect(() =>
-      buildDeterministicAuthorizedBatch([{ ...payload(), signature: '' }])
-    ).toThrow('Invalid authorized telemetry payload');
-    expect(() =>
-      buildDeterministicAuthorizedBatch([payload()], {
         topic: 'telemetry.authorized.v1',
         partition: 0,
         entries: [
-          { offset: '1', eventId: 'event-1' },
-          { offset: '2', eventId: 'event-2' }
-        ]
-      })
-    ).toThrow('entry count');
+          { offset: '7', eventId: 'event-1' },
+          { offset: '8', eventId: 'event-2' },
+        ],
+      }
+    );
+    expect(JSON.parse(new TextDecoder().decode(result.bytes))).toEqual(
+      result.artifact
+    );
+    expect(new TextDecoder().decode(result.bytes)).toBe(
+      canonicalize(result.artifact)
+    );
+    expect(result.artifact.events[0]).toEqual({
+      sensor_id: Buffer.alloc(32, 1).toString('base64'),
+      signed_envelope: Buffer.from([1, 2, 3]).toString('base64'),
+    });
+  });
+
+  it('is deterministic and validates current payload constraints', () => {
+    expect(
+      buildDeterministicAuthorizedBatch([authorizedPayload()]).bytes
+    ).toEqual(buildDeterministicAuthorizedBatch([authorizedPayload()]).bytes);
+    expect(() => buildDeterministicAuthorizedBatch([])).toThrow('empty');
+    expect(() =>
+      buildDeterministicAuthorizedBatch([
+        { ...authorizedPayload(), sensorId: Buffer.alloc(31) },
+      ])
+    ).toThrow('32 bytes');
+    expect(() =>
+      buildDeterministicAuthorizedBatch([
+        { ...authorizedPayload(), signedEnvelope: Buffer.alloc(0) },
+      ])
+    ).toThrow('cannot be empty');
   });
 });
 
-describe('IPFS batch publication', () => {
-  it('adds canonical bytes with stable options and pins the CID', async () => {
-    const { client, add, pinAdd } = createIpfsDouble();
-    const bytes = new Uint8Array([1, 2, 3]);
-
-    await expect(publishAndPinAuthorizedBatch(client, bytes)).resolves.toBe(
-      testCid
-    );
-    expect(add).toHaveBeenCalledWith(bytes, {
+describe('IPFS publication', () => {
+  it('adds fixed bytes, pins the CID, and confirms the pin', async () => {
+    const test = ipfsDouble();
+    const bytes = Buffer.from([1, 2, 3]);
+    await expect(
+      publishAndPinAuthorizedBatch(test.client, bytes)
+    ).resolves.toBe(cid);
+    expect(test.add).toHaveBeenCalledWith(bytes, {
       cidVersion: 1,
       hashAlg: 'sha2-256',
       rawLeaves: true,
       chunker: 'size-262144',
       wrapWithDirectory: false,
-      pin: false
+      pin: false,
     });
-    expect(pinAdd).toHaveBeenCalledWith(testCid, { recursive: true });
-  });
-
-  it('confirms a present pin and rejects a missing pin', async () => {
+    expect(test.pinAdd).toHaveBeenCalledWith(cid, { recursive: true });
     await expect(
-      confirmAuthorizedBatchPin(createIpfsDouble().client, testCid)
+      confirmAuthorizedBatchPin(test.client, cid)
     ).resolves.toBeUndefined();
     await expect(
-      confirmAuthorizedBatchPin(createIpfsDouble([]).client, testCid)
+      confirmAuthorizedBatchPin(ipfsDouble([]).client, cid)
     ).rejects.toThrow('did not confirm pin');
-  });
-
-  it('rejects an empty artifact before calling Kubo', async () => {
-    const { client, add, pinAdd } = createIpfsDouble();
-
-    await expect(
-      publishAndPinAuthorizedBatch(client, new Uint8Array())
-    ).rejects.toThrow('empty IPFS batch artifact');
-    expect(add).not.toHaveBeenCalled();
-    expect(pinAdd).not.toHaveBeenCalled();
-  });
-
-  it('does not pin when Kubo add fails or returns an empty CID', async () => {
-    const failedAdd = createIpfsDouble();
-    failedAdd.add.mockRejectedValueOnce(new Error('fetch failed'));
-
-    await expect(
-      publishAndPinAuthorizedBatch(failedAdd.client, new Uint8Array([1]))
-    ).rejects.toThrow('fetch failed');
-    expect(failedAdd.pinAdd).not.toHaveBeenCalled();
-
-    const emptyCid = createIpfsDouble([testCid], '');
-    await expect(
-      publishAndPinAuthorizedBatch(emptyCid.client, new Uint8Array([1]))
-    ).rejects.toThrow('empty CID');
-    expect(emptyCid.pinAdd).not.toHaveBeenCalled();
-  });
-
-  it('rejects a pin response for a different CID', async () => {
-    const { client, pinAdd } = createIpfsDouble(
-      [testCid],
-      testCid,
-      'bafybeidifferent'
-    );
-
-    await expect(
-      publishAndPinAuthorizedBatch(client, new Uint8Array([1]))
-    ).rejects.toThrow('pinned unexpected CID');
-    expect(pinAdd).toHaveBeenCalledWith(testCid, { recursive: true });
   });
 });

@@ -5,7 +5,7 @@ TypeScript monorepo for the event-driven telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00 through WP-03 are fully implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`, `heartbeat-tracker`). WP-04 (`ipfs-publisher`) and WP-05 (`blockchain-anchor`) remain scaffolded.
+> Current phase: WP-00 through WP-04 are implemented. WP-05 (`blockchain-anchor`) remains scaffolded.
 
 ## Stack
 
@@ -43,7 +43,7 @@ pnpm dev
 ## Workspace layout
 
 ```text
-packages/contracts         # @scp/core - shared schemas, types, validation, consumer runtime
+packages/core              # @scp/core - shared protobuf schemas, topics, and validation
 services/endpoint          # POST /v1/telemetry ingress - protobuf validation, signature verification
 services/registry-sync     # Robonomics blockchain→Redis projection sync service
 services/whitelist         # Whitelist-based sensor authentication provider
@@ -161,8 +161,8 @@ const description = getRejectionCodeDescription(payload.reasonCode);
 - **whitelist**: Alternative authentication provider - maintains static sensor whitelist in Redis, bypassing blockchain dependency for simpler deployments.
 - **pubsub-broadcaster**: Consumes `telemetry.authorized.v1`, publishes to libp2p/GossipSub for real-time web UI, emits `telemetry.pubsub.result.v1`, routes exhausted failures to DLQ.
 - **heartbeat-tracker**: Observability-only consumer of `telemetry.authorized.v1`, tracks sensor liveness (`firstSeen`, `lastSeen`, `onlineSince`) in Redis, exposes `sensors_online` count and per-sensor/aggregate uptime metrics over configurable online window (default 30s). Does not emit result events or participate in retry/DLQ.
-- **ipfs-publisher**: Consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
-- **blockchain-anchor**: Consumes `telemetry.ipfs.result.v1`, deduplicates by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring (stubbed).
+- **ipfs-publisher**: Consumes `telemetry.authorized.v1`, batches and publishes to IPFS, emits protobuf `ipfs.published.v1`.
+- **blockchain-anchor**: Consumes `ipfs.published.v1`, deduplicates by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring (stubbed).
 
 ## Local infrastructure
 

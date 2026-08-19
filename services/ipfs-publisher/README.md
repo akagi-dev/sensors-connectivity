@@ -1,46 +1,40 @@
 # IPFS Publisher
 
-`ipfs-publisher` consumes `telemetry.authorized.v1` from Kafka and publishes deterministic, pinned telemetry batches to Kubo IPFS.
-
-Consumed messages must match the WP-00 envelope and `telemetry.authorized.v1` payload schemas exported by `@scp/contracts`; invalid messages are rejected before IPFS publication.
+`ipfs-publisher` consumes binary protobuf `Envelope` records from `telemetry.authorized.v1`, builds deterministic batches, and publishes and pins them to Kubo IPFS. Contracts and generated protobuf schemas come from `@scp/core`.
 
 ## Configuration
 
-- `KAFKA_BROKERS` — comma-separated broker endpoints; default `localhost:9092`.
-- `IPFS_PUBLISHER_GROUP_ID` — Kafka consumer group; default `ipfs-publisher-v1`.
-- `IPFS_PUBLISHER_BATCH_MAX_EVENTS` — maximum events per partition batch; default `100`.
-- `IPFS_PUBLISHER_BATCH_MAX_WAIT_MS` — maximum time before sealing a non-empty batch; default `1000`.
-- `IPFS_PUBLISHER_MAX_RETRIES` — maximum Kubo attempts per publication or pin-confirmation stage; default `3`.
-- `IPFS_PUBLISHER_RETRY_BACKOFF_MS` — delay between transient Kubo attempts; default `250`.
-- `IPFS_PUBLISHER_HEALTH_PORT` — HTTP port for health and Prometheus metrics; default `3040`.
-- `IPFS_API_URL` — Kubo RPC endpoint; default `http://localhost:5001`.
+- `KAFKA_BROKERS`: comma-separated brokers; default `localhost:9092`. Empty lists are rejected.
+- `IPFS_PUBLISHER_GROUP_ID`: consumer group; default `ipfs-publisher-v1`. Empty values are rejected.
+- `IPFS_PUBLISHER_BATCH_MAX_EVENTS`: events per partition batch; default `100`.
+- `IPFS_PUBLISHER_BATCH_MAX_WAIT_MS`: maximum batching delay; default `1000`.
+- `IPFS_PUBLISHER_MAX_RETRIES`: Kubo attempts per publication or pin check; default `3`.
+- `IPFS_PUBLISHER_RETRY_BACKOFF_MS`: retry delay; default `250`.
+- `IPFS_PUBLISHER_HEALTH_PORT`: health/metrics port; default `3040`.
+- `IPFS_API_URL`: Kubo RPC endpoint; default `http://localhost:5001`.
 
-Batches never mix Kafka partitions and preserve offset order. Their IDs are SHA-256 hashes of a canonical descriptor containing topic, partition, offset range, and ordered event IDs.
+Batches never mix Kafka partitions. A stable `batch_id` is derived from the topic, partition, ordered offsets, and event IDs. The canonical JSON IPFS artifact contains the validated current payload fields as base64 strings: `sensor_id` and `signed_envelope`.
 
-The v1 IPFS object is canonical JSON containing `schema_version`, `batch_id`, `event_count`, and the validated `telemetry.authorized.v1` payloads in batch order. Identical batch contents produce identical bytes before Kubo CID calculation.
+After `ipfs.add`, explicit pinning, and pin confirmation, the service publishes a binary protobuf result envelope to `ipfs.published.v1`. Its `TelemetryIpfsPublishedPayload` contains CID bytes and `event_count`; the Kafka key is `batch_id`.
 
-The publisher adds an artifact with fixed CIDv1/SHA-256 options, explicitly pins the returned CID, and confirms the pin before processing can continue. Verify this path against the Compose Kubo node with:
+Transient Kubo failures are retried with a bounded delay. Exhausted or terminal failures are published to `telemetry.dlq.v1` in a protobuf envelope with detailed canonical JSON failure context. The result/DLQ producer waits for the broker acknowledgement.
+
+Platformatic Kafka auto-commit is disabled. Successful and already-deduplicated batches invoke the manual commit callback of the last message only after result publication. Failed and DLQ batches stay uncommitted for replay. A process-local deduplication store prevents repeated IPFS publication during the lifetime of one service instance.
+
+## Verification
+
+```bash
+pnpm --filter @scp/ipfs-publisher typecheck
+pnpm --filter @scp/ipfs-publisher lint
+pnpm --filter @scp/ipfs-publisher test
+pnpm --filter @scp/ipfs-publisher build
+```
+
+Run the optional Kubo integration test against Compose infrastructure:
 
 ```bash
 docker compose up -d ipfs
 IPFS_PUBLISHER_IPFS_INTEGRATION=1 pnpm --filter @scp/ipfs-publisher test -- tests/ipfs.integration.test.ts
 ```
 
-Completed `batch_id` values are recorded only after the processing sequence succeeds. A replay of the same batch is then classified as a duplicate before `ipfs.add` is called. The current deduplication store is process-local; it does not preserve processed IDs across service restarts.
-
-After pin confirmation, the service publishes a WP-00 envelope to `telemetry.ipfs.result.v1`. The Kafka message key is `batch_id`; its payload contains the pinned `cid` and `event_count`. Processing continues only after `producer.send` resolves with the broker acknowledgement.
-
-Kubo network failures, timeouts, HTTP `408`/`425`/`429`/`5xx`, and temporarily missing pin confirmation are retried with a bounded delay. Contract and CID validation failures are terminal and are not retried.
-
-After Kubo attempts are exhausted, the service publishes an ACK-gated WP-00 envelope to `telemetry.dlq.v1` with `batch_id` as the Kafka key. The payload records the failed batch, failure stage, reason, actual attempt count, configured limit, and failure timestamp.
-
-KafkaJS auto-commit is disabled. After pin confirmation and the `telemetry.ipfs.result.v1` broker ACK, the consumer explicitly commits `last_batch_offset + 1`. Duplicate batches may also commit because their successful result was previously recorded. Failed and DLQ batches remain uncommitted for replay.
-
-## Observability
-
-Pino writes structured JSON logs with batch, Kafka offset, CID, retry, DLQ, and pin-latency fields. While the service is running, `GET /health` returns a JSON liveness response and `GET /metrics` exposes Prometheus text metrics:
-
-- `ipfs_publisher_batches_total`
-- `ipfs_publisher_pin_latency_ms`, `_sum`, and `_count`
-- `ipfs_publisher_retries_total`
-- `ipfs_publisher_dlq_total`
+The service exposes `GET /health` and Prometheus metrics at `GET /metrics`, including batch, pin-latency, retry, and DLQ counters.

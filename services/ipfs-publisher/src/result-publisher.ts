@@ -1,20 +1,33 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { create, toBinary } from '@bufbuild/protobuf';
+import type { Producer } from '@platformatic/kafka';
 import {
-  parseEnvelope,
-  parseEnvelopeWithKnownPayload,
+  EnvelopeSchema,
   TELEMETRY_TOPICS,
-  type FailureContext,
-  type TelemetryAuthorizedPayload,
-  type TelemetryIpfsPublishedPayload
-} from '@scp/contracts';
-import type { Producer } from 'kafkajs';
+  TelemetryIpfsPublishedPayloadSchema,
+  type Envelope,
+  type TelemetryIpfsPublishedPayload,
+} from '@scp/core';
+import { canonicalize } from 'json-canonicalize';
 import { randomUUID } from 'node:crypto';
+import type { SerializedAuthorizedPayload } from './batch-publisher.js';
 
 export interface IpfsResultEnvelope {
-  event_id: string;
-  event_type: typeof TELEMETRY_TOPICS.IPFS_RESULT;
-  event_version: 'v1';
-  occurred_at: string;
-  source: 'ipfs-publisher';
+  envelope: Envelope;
   payload: TelemetryIpfsPublishedPayload;
 }
 
@@ -29,24 +42,31 @@ export type IpfsDlqReasonCode =
   | 'result_event_failed'
   | 'result_publish_failed';
 
+export interface IpfsFailureContext {
+  topic: typeof TELEMETRY_TOPICS.DLQ;
+  reason: string;
+  eventId: string;
+  attempt: number;
+  maxAttempts: number;
+  failedAt: string;
+}
+
 export interface IpfsFailedBatch {
   batch_id: string;
-  events: TelemetryAuthorizedPayload[];
+  events: SerializedAuthorizedPayload[];
+}
+
+export interface IpfsDlqPayload {
+  failed_topic: typeof TELEMETRY_TOPICS.AUTHORIZED;
+  reason_code: IpfsDlqReasonCode;
+  reason_message: string;
+  failed_event: IpfsFailedBatch;
+  context: IpfsFailureContext;
 }
 
 export interface IpfsDlqEnvelope {
-  event_id: string;
-  event_type: typeof TELEMETRY_TOPICS.DLQ;
-  event_version: 'v1';
-  occurred_at: string;
-  source: 'ipfs-publisher';
-  payload: {
-    failed_topic: typeof TELEMETRY_TOPICS.AUTHORIZED;
-    reason_code: IpfsDlqReasonCode;
-    reason_message: string;
-    failed_event: IpfsFailedBatch;
-    context: FailureContext;
-  };
+  envelope: Envelope;
+  payload: IpfsDlqPayload;
 }
 
 export interface IpfsResultPublisher {
@@ -56,150 +76,106 @@ export interface IpfsResultPublisher {
   publishDlq(batchId: string, envelope: IpfsDlqEnvelope): Promise<void>;
 }
 
-/** Builds and validates the canonical WP-00 IPFS publication result envelope. */
 export function buildIpfsResultEnvelope(
   cid: string,
   eventCount: number,
   options: IpfsResultEnvelopeOptions = {}
 ): IpfsResultEnvelope {
-  const envelope: IpfsResultEnvelope = {
-    event_id: options.eventId ?? randomUUID(),
-    event_type: TELEMETRY_TOPICS.IPFS_RESULT,
-    event_version: 'v1',
-    occurred_at: options.occurredAt ?? new Date().toISOString(),
-    source: 'ipfs-publisher',
-    payload: {
-      cid,
-      event_count: eventCount
-    }
-  };
-  const validated = parseEnvelopeWithKnownPayload(envelope);
-  if (validated.event_type !== TELEMETRY_TOPICS.IPFS_RESULT) {
-    throw new Error('IPFS result envelope has an unexpected event_type');
+  if (cid.trim().length === 0)
+    throw new Error('IPFS result CID cannot be empty');
+  if (
+    !Number.isInteger(eventCount) ||
+    eventCount < 1 ||
+    eventCount > 0xffffffff
+  ) {
+    throw new Error('IPFS result event_count must be a positive uint32');
   }
-
-  return envelope;
+  const payload = create(TelemetryIpfsPublishedPayloadSchema, {
+    cid: new TextEncoder().encode(cid),
+    eventCount,
+  });
+  const envelope = create(EnvelopeSchema, {
+    eventId: options.eventId ?? randomUUID(),
+    eventType: TELEMETRY_TOPICS.IPFS_PUBLISHED,
+    eventVersion: 'v1',
+    occurredAt: options.occurredAt ?? new Date().toISOString(),
+    source: 'ipfs-publisher',
+    payload: toBinary(TelemetryIpfsPublishedPayloadSchema, payload),
+  });
+  return { envelope, payload };
 }
 
-/** Builds and validates a WP-00 DLQ envelope with the original batch and exhausted-error context. */
 export function buildIpfsDlqEnvelope(
   failedBatch: IpfsFailedBatch,
   reasonCode: IpfsDlqReasonCode,
   reasonMessage: string,
-  context: FailureContext,
+  context: IpfsFailureContext,
   options: IpfsResultEnvelopeOptions = {}
 ): IpfsDlqEnvelope {
+  if (failedBatch.batch_id.length === 0)
+    throw new Error('IPFS DLQ batch_id cannot be empty');
   if (context.topic !== TELEMETRY_TOPICS.DLQ) {
     throw new Error('IPFS DLQ context must target telemetry.dlq.v1');
   }
-  const envelope: IpfsDlqEnvelope = {
-    event_id: options.eventId ?? randomUUID(),
-    event_type: TELEMETRY_TOPICS.DLQ,
-    event_version: 'v1',
-    occurred_at: options.occurredAt ?? new Date().toISOString(),
-    source: 'ipfs-publisher',
-    payload: {
-      failed_topic: TELEMETRY_TOPICS.AUTHORIZED,
-      reason_code: reasonCode,
-      reason_message: reasonMessage,
-      failed_event: failedBatch,
-      context
-    }
+  const payload: IpfsDlqPayload = {
+    failed_topic: TELEMETRY_TOPICS.AUTHORIZED,
+    reason_code: reasonCode,
+    reason_message: reasonMessage,
+    failed_event: failedBatch,
+    context,
   };
-  parseEnvelope(envelope);
-  return envelope;
+  const envelope = create(EnvelopeSchema, {
+    eventId: options.eventId ?? randomUUID(),
+    eventType: TELEMETRY_TOPICS.DLQ,
+    eventVersion: 'v1',
+    occurredAt: options.occurredAt ?? new Date().toISOString(),
+    source: 'ipfs-publisher',
+    payload: new TextEncoder().encode(canonicalize(payload)),
+  });
+  return { envelope, payload };
 }
 
-/** Creates a Kafka result and DLQ publisher that uses batch_id as the key and waits for broker ACKs. */
 export function createKafkaIpfsResultPublisher(
   producer: Producer
 ): IpfsResultPublisher {
-  let connected = false;
-  let connectPromise: Promise<void> | undefined;
-
-  /** Establishes the single shared Kafka producer connection. */
-  async function ensureConnected(): Promise<void> {
-    if (connected) {
-      return;
-    }
-    if (!connectPromise) {
-      connectPromise = producer.connect().then(() => {
-        connected = true;
-      });
-    }
-
-    try {
-      await connectPromise;
-    } catch (error) {
-      connectPromise = undefined;
-      throw error;
-    }
-  }
-
   return {
-    connect: ensureConnected,
+    async connect(): Promise<void> {},
     async disconnect(): Promise<void> {
-      if (connectPromise) {
-        try {
-          await connectPromise;
-        } catch {
-          connectPromise = undefined;
-          return;
-        }
-      }
-      if (!connected) {
-        return;
-      }
-
-      await producer.disconnect();
-      connected = false;
-      connectPromise = undefined;
+      await producer.close();
     },
-    async publish(
-      batchId: string,
-      envelope: IpfsResultEnvelope
-    ): Promise<void> {
-      if (batchId.length === 0) {
-        throw new Error('Cannot publish an IPFS result without batch_id');
-      }
-      const validated = parseEnvelopeWithKnownPayload(envelope);
-      if (validated.event_type !== TELEMETRY_TOPICS.IPFS_RESULT) {
+    async publish(batchId, result): Promise<void> {
+      validateBatchId(batchId);
+      if (result.envelope.eventType !== TELEMETRY_TOPICS.IPFS_PUBLISHED) {
         throw new Error('Cannot publish a non-IPFS result envelope');
       }
-
-      await ensureConnected();
       await producer.send({
-        topic: TELEMETRY_TOPICS.IPFS_RESULT,
         messages: [
           {
-            key: batchId,
-            value: JSON.stringify(validated)
-          }
-        ]
+            topic: TELEMETRY_TOPICS.IPFS_PUBLISHED,
+            key: Buffer.from(batchId),
+            value: Buffer.from(toBinary(EnvelopeSchema, result.envelope)),
+          },
+        ],
       });
     },
-    async publishDlq(
-      batchId: string,
-      envelope: IpfsDlqEnvelope
-    ): Promise<void> {
-      if (batchId.length === 0) {
-        throw new Error('Cannot publish an IPFS DLQ record without batch_id');
-      }
-      const validated = parseEnvelope(envelope);
-      if (validated.event_type !== TELEMETRY_TOPICS.DLQ) {
+    async publishDlq(batchId, result): Promise<void> {
+      validateBatchId(batchId);
+      if (result.envelope.eventType !== TELEMETRY_TOPICS.DLQ) {
         throw new Error('Cannot publish a non-DLQ envelope');
       }
-
-      await ensureConnected();
       await producer.send({
-        topic: TELEMETRY_TOPICS.DLQ,
         messages: [
           {
-            key: batchId,
-            value: JSON.stringify(validated)
-          }
-        ]
+            topic: TELEMETRY_TOPICS.DLQ,
+            key: Buffer.from(batchId),
+            value: Buffer.from(toBinary(EnvelopeSchema, result.envelope)),
+          },
+        ],
       });
-    }
+    },
   };
+}
+
+function validateBatchId(batchId: string): void {
+  if (batchId.length === 0) throw new Error('Cannot publish without batch_id');
 }

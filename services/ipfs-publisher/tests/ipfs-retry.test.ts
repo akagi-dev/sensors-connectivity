@@ -1,7 +1,22 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import {
   isTransientIpfsError,
-  runWithBoundedIpfsRetry
+  runWithBoundedIpfsRetry,
 } from '../src/ipfs-retry.js';
 
 describe('bounded IPFS retry', () => {
@@ -21,7 +36,7 @@ describe('bounded IPFS retry', () => {
         maxAttempts: 3,
         backoffMs: 25,
         onRetry,
-        sleep
+        sleep,
       })
     ).resolves.toBe('bafy-result');
 
@@ -41,7 +56,7 @@ describe('bounded IPFS retry', () => {
       runWithBoundedIpfsRetry(operation, {
         maxAttempts: 3,
         backoffMs: 0,
-        sleep: async () => undefined
+        sleep: async () => undefined,
       })
     ).rejects.toThrow('unexpected CID');
     expect(operation).toHaveBeenCalledTimes(1);
@@ -56,7 +71,7 @@ describe('bounded IPFS retry', () => {
       runWithBoundedIpfsRetry(operation, {
         maxAttempts: 2,
         backoffMs: 0,
-        sleep: async () => undefined
+        sleep: async () => undefined,
       })
     ).rejects.toThrow('network unavailable');
     expect(operation).toHaveBeenCalledTimes(2);
@@ -69,7 +84,7 @@ describe('bounded IPFS retry', () => {
     expect(
       isTransientIpfsError(
         Object.assign(new Error('outer failure'), {
-          cause: { code: 'ETIMEDOUT' }
+          cause: { code: 'ETIMEDOUT' },
         })
       )
     ).toBe(true);

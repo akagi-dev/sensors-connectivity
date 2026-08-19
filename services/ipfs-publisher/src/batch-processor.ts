@@ -1,25 +1,33 @@
-import {
-  runConsumerProcessingRule,
-  TELEMETRY_TOPICS,
-  type FailureContext,
-  type InMemoryDedupStore,
-  type RetryDlqPublisher,
-  type TelemetryAuthorizedPayload
-} from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { TELEMETRY_TOPICS, type TelemetryAuthorizedPayload } from '@scp/core';
 import {
   buildDeterministicAuthorizedBatch,
   confirmAuthorizedBatchPin,
   publishAndPinAuthorizedBatch,
-  type IpfsBatchClient
+  type IpfsBatchClient,
 } from './batch-publisher.js';
 import {
   deriveAuthorizedBatchId,
   type AuthorizedBatchIdContext,
-  type SealedAuthorizedBatch
+  type SealedAuthorizedBatch,
 } from './batching.js';
 import {
   runWithBoundedIpfsRetry,
-  type IpfsRetryOptions
+  type IpfsRetryOptions,
 } from './ipfs-retry.js';
 import { logInfo, logWarn } from './logger.js';
 import type { IpfsPublisherMetrics } from './metrics.js';
@@ -27,17 +35,30 @@ import {
   buildIpfsDlqEnvelope,
   buildIpfsResultEnvelope,
   type IpfsDlqReasonCode,
-  type IpfsResultPublisher
+  type IpfsFailureContext,
+  type IpfsResultPublisher,
 } from './result-publisher.js';
 
-interface AuthorizedBatch {
-  batch_id: string;
-  events: TelemetryAuthorizedPayload[];
+export interface BatchDedupStore {
+  has(batchId: string): boolean | Promise<boolean>;
+  add(batchId: string): void | Promise<void>;
+}
+
+export class InMemoryBatchDedupStore implements BatchDedupStore {
+  private readonly batchIds = new Set<string>();
+
+  has(batchId: string): boolean {
+    return this.batchIds.has(batchId);
+  }
+
+  add(batchId: string): void {
+    this.batchIds.add(batchId);
+  }
 }
 
 export interface AuthorizedPayloadProcessingDependencies {
   ipfs: IpfsBatchClient;
-  dedupStore: InMemoryDedupStore;
+  dedupStore: BatchDedupStore;
   resultPublisher: IpfsResultPublisher;
   ipfsRetry?: Pick<IpfsRetryOptions, 'maxAttempts' | 'backoffMs'>;
   commitOffset: () => Promise<void>;
@@ -48,10 +69,6 @@ export interface AuthorizedPayloadProcessingDependencies {
 export type AuthorizedBatchProcessingStatus =
   'processed' | 'duplicate' | 'retried' | 'dlq';
 
-/**
- * Runs the deterministic IPFS publication flow for one set of authorized
- * payloads.
- */
 export async function processAuthorizedPayload(
   payload: TelemetryAuthorizedPayload,
   dependencies: AuthorizedPayloadProcessingDependencies
@@ -59,7 +76,6 @@ export async function processAuthorizedPayload(
   return processAuthorizedEvents([payload], dependencies);
 }
 
-/** Runs deterministic IPFS publication for one sealed Kafka batch. */
 export async function processSealedAuthorizedBatch(
   batch: SealedAuthorizedBatch,
   dependencies: AuthorizedPayloadProcessingDependencies
@@ -69,8 +85,8 @@ export async function processSealedAuthorizedBatch(
     partition: batch.partition,
     entries: batch.entries.map((entry) => ({
       offset: entry.offset,
-      eventId: entry.envelope.event_id
-    }))
+      eventId: entry.envelope.eventId,
+    })),
   };
   if (deriveAuthorizedBatchId(context) !== batch.batchId) {
     throw new Error('Sealed authorized batch_id does not match its entries');
@@ -82,34 +98,30 @@ export async function processSealedAuthorizedBatch(
   );
 }
 
-/**
- * Applies the common publication rule to validated events and optional Kafka
- * batch identity metadata.
- */
 async function processAuthorizedEvents(
   events: TelemetryAuthorizedPayload[],
   dependencies: AuthorizedPayloadProcessingDependencies,
   batchContext?: AuthorizedBatchIdContext
 ): Promise<AuthorizedBatchProcessingStatus> {
-  if (dependencies.metrics) {
-    dependencies.metrics.batchCount += 1;
-  }
-  const batch: AuthorizedBatch = {
-    batch_id: `batch-${Date.now()}`,
-    events
-  };
+  if (dependencies.metrics) dependencies.metrics.batchCount += 1;
   const deterministicBatch = buildDeterministicAuthorizedBatch(
-    batch.events,
+    events,
     batchContext
   );
-  batch.batch_id = deterministicBatch.batchId;
-  let publishedCid: string | undefined;
-  let pinStartedAt = 0;
-  const now = dependencies.now ?? Date.now;
+  const batchId = deterministicBatch.batchId;
+
+  if (await dependencies.dedupStore.has(batchId)) {
+    await dependencies.commitOffset();
+    return 'duplicate';
+  }
+
   const retryPolicy = dependencies.ipfsRetry ?? {
     maxAttempts: 1,
-    backoffMs: 0
+    backoffMs: 0,
   };
+  const now = dependencies.now ?? Date.now;
+  let publishedCid: string | undefined;
+  let pinStartedAt: number;
   let failureState: {
     reasonCode: IpfsDlqReasonCode;
     attempt: number;
@@ -117,157 +129,122 @@ async function processAuthorizedEvents(
   } = {
     reasonCode: 'ipfs_publish_or_pin_failed',
     attempt: 1,
-    maxAttempts: retryPolicy.maxAttempts
+    maxAttempts: retryPolicy.maxAttempts,
   };
 
-  const retryDlqPublisher: RetryDlqPublisher<AuthorizedBatch> = {
-    async publishRetry(event, reason) {
-      logWarn('retry stub', {
-        topic: TELEMETRY_TOPICS.RETRY,
-        batchId: event.batch_id,
-        reason
-      });
-    },
-    async publishDlq(event, reason, context) {
-      const failureContext: FailureContext = {
-        topic: TELEMETRY_TOPICS.DLQ,
-        reason: context?.reason ?? reason,
-        eventId: event.batch_id,
-        attempt: failureState.attempt,
-        maxAttempts: failureState.maxAttempts,
-        failedAt: context?.failedAt ?? new Date().toISOString()
-      };
-      const envelope = buildIpfsDlqEnvelope(
-        event,
-        failureState.reasonCode,
-        failureContext.reason,
-        failureContext
-      );
-      await dependencies.resultPublisher.publishDlq(event.batch_id, envelope);
-      if (dependencies.metrics) {
-        dependencies.metrics.dlqCount += 1;
+  try {
+    pinStartedAt = now();
+    publishedCid = await runWithBoundedIpfsRetry(
+      () =>
+        publishAndPinAuthorizedBatch(
+          dependencies.ipfs,
+          deterministicBatch.bytes
+        ),
+      {
+        ...retryPolicy,
+        onRetry: (error, attempt) => {
+          if (dependencies.metrics) dependencies.metrics.retryCount += 1;
+          failureState.attempt = attempt + 1;
+          logWarn('retrying transient IPFS publication failure', {
+            batchId,
+            attempt,
+            maxAttempts: retryPolicy.maxAttempts,
+            retryBackoffMs: retryPolicy.backoffMs,
+            error: errorMessage(error),
+          });
+        },
       }
-      logWarn('failed IPFS batch published to Kafka DLQ', {
-        topic: TELEMETRY_TOPICS.DLQ,
-        batchId: event.batch_id,
-        eventId: envelope.event_id,
-        reasonCode: envelope.payload.reason_code,
-        reason: failureContext.reason,
-        attempt: failureContext.attempt,
-        maxAttempts: failureContext.maxAttempts
-      });
+    );
+    logInfo('built and published deterministic IPFS object', {
+      batchId,
+      cid: publishedCid,
+      eventCount: events.length,
+    });
+
+    failureState = {
+      reasonCode: 'pin_confirmation_failed',
+      attempt: 1,
+      maxAttempts: retryPolicy.maxAttempts,
+    };
+    await runWithBoundedIpfsRetry(
+      () => confirmAuthorizedBatchPin(dependencies.ipfs, publishedCid!),
+      {
+        ...retryPolicy,
+        onRetry: (error, attempt) => {
+          if (dependencies.metrics) dependencies.metrics.retryCount += 1;
+          failureState.attempt = attempt + 1;
+          logWarn('retrying transient IPFS pin confirmation failure', {
+            batchId,
+            cid: publishedCid,
+            attempt,
+            maxAttempts: retryPolicy.maxAttempts,
+            retryBackoffMs: retryPolicy.backoffMs,
+            error: errorMessage(error),
+          });
+        },
+      }
+    );
+
+    const pinLatencyMs = Math.max(now() - pinStartedAt, 0);
+    if (dependencies.metrics) {
+      dependencies.metrics.pinCount += 1;
+      dependencies.metrics.pinLatencyMs = pinLatencyMs;
+      dependencies.metrics.pinLatencyTotalMs += pinLatencyMs;
     }
-  };
+    logInfo('IPFS pin confirmed', { batchId, cid: publishedCid, pinLatencyMs });
 
-  return runConsumerProcessingRule(batch, {
-    dedup: {
-      keyType: 'batch_id',
-      getKeyValue: (event) => event.batch_id,
-      store: dependencies.dedupStore
-    },
-    performExternalAction: async () => {
-      pinStartedAt = now();
-      failureState = {
-        reasonCode: 'ipfs_publish_or_pin_failed',
-        attempt: 1,
-        maxAttempts: retryPolicy.maxAttempts
-      };
-      publishedCid = await runWithBoundedIpfsRetry(
-        () =>
-          publishAndPinAuthorizedBatch(
-            dependencies.ipfs,
-            deterministicBatch.bytes
-          ),
-        {
-          ...retryPolicy,
-          onRetry: (error, attempt) => {
-            if (dependencies.metrics) {
-              dependencies.metrics.retryCount += 1;
-            }
-            failureState.attempt = attempt + 1;
-            logWarn('retrying transient IPFS publication failure', {
-              batchId: batch.batch_id,
-              attempt,
-              maxAttempts: retryPolicy.maxAttempts,
-              retryBackoffMs: retryPolicy.backoffMs,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
-      );
-      logInfo('built and published deterministic IPFS object', {
-        batchId: batch.batch_id,
-        cid: publishedCid,
-        eventCount: batch.events.length
-      });
-    },
-    waitForConfirmation: async () => {
-      failureState = {
-        reasonCode: 'pin_confirmation_failed',
-        attempt: 1,
-        maxAttempts: retryPolicy.maxAttempts
-      };
-      if (!publishedCid) {
-        throw new Error('IPFS publication did not return a CID');
-      }
-      await runWithBoundedIpfsRetry(
-        () => confirmAuthorizedBatchPin(dependencies.ipfs, publishedCid!),
-        {
-          ...retryPolicy,
-          onRetry: (error, attempt) => {
-            if (dependencies.metrics) {
-              dependencies.metrics.retryCount += 1;
-            }
-            failureState.attempt = attempt + 1;
-            logWarn('retrying transient IPFS pin confirmation failure', {
-              batchId: batch.batch_id,
-              cid: publishedCid,
-              attempt,
-              maxAttempts: retryPolicy.maxAttempts,
-              retryBackoffMs: retryPolicy.backoffMs,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
-      );
-      const pinLatencyMs = Math.max(now() - pinStartedAt, 0);
-      if (dependencies.metrics) {
-        dependencies.metrics.pinCount += 1;
-        dependencies.metrics.pinLatencyMs = pinLatencyMs;
-        dependencies.metrics.pinLatencyTotalMs += pinLatencyMs;
-      }
-      logInfo('IPFS pin confirmed', {
-        batchId: batch.batch_id,
-        cid: publishedCid,
-        pinLatencyMs
-      });
-    },
-    emitResultEvent: async (event) => {
-      failureState = {
-        reasonCode: 'result_event_failed',
-        attempt: 1,
-        maxAttempts: 1
-      };
-      if (!publishedCid) {
-        throw new Error('Cannot emit IPFS result without a published CID');
-      }
-      return buildIpfsResultEnvelope(publishedCid, event.events.length);
-    },
-    publishResultEvent: async (result) => {
-      failureState = {
-        reasonCode: 'result_publish_failed',
-        attempt: 1,
-        maxAttempts: 1
-      };
-      await dependencies.resultPublisher.publish(batch.batch_id, result);
-      logInfo('IPFS result published to Kafka', {
-        batchId: batch.batch_id,
-        eventId: result.event_id,
-        cid: result.payload.cid,
-        eventCount: result.payload.event_count
-      });
-    },
-    commitOffset: dependencies.commitOffset,
-    retryDlqPublisher
-  });
+    failureState = {
+      reasonCode: 'result_event_failed',
+      attempt: 1,
+      maxAttempts: 1,
+    };
+    const result = buildIpfsResultEnvelope(publishedCid, events.length);
+    failureState = {
+      reasonCode: 'result_publish_failed',
+      attempt: 1,
+      maxAttempts: 1,
+    };
+    await dependencies.resultPublisher.publish(batchId, result);
+    logInfo('IPFS result published to Kafka', {
+      batchId,
+      eventId: result.envelope.eventId,
+      cid: publishedCid,
+      eventCount: result.payload.eventCount,
+    });
+  } catch (error) {
+    const failureContext: IpfsFailureContext = {
+      topic: TELEMETRY_TOPICS.DLQ,
+      reason: errorMessage(error),
+      eventId: batchId,
+      attempt: failureState.attempt,
+      maxAttempts: failureState.maxAttempts,
+      failedAt: new Date().toISOString(),
+    };
+    const dlq = buildIpfsDlqEnvelope(
+      { batch_id: batchId, events: deterministicBatch.artifact.events },
+      failureState.reasonCode,
+      failureContext.reason,
+      failureContext
+    );
+    await dependencies.resultPublisher.publishDlq(batchId, dlq);
+    if (dependencies.metrics) dependencies.metrics.dlqCount += 1;
+    logWarn('failed IPFS batch published to Kafka DLQ', {
+      topic: TELEMETRY_TOPICS.DLQ,
+      batchId,
+      eventId: dlq.envelope.eventId,
+      reasonCode: dlq.payload.reason_code,
+      reason: failureContext.reason,
+      attempt: failureContext.attempt,
+      maxAttempts: failureContext.maxAttempts,
+    });
+    return 'dlq';
+  }
+
+  await dependencies.dedupStore.add(batchId);
+  await dependencies.commitOffset();
+  return 'processed';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

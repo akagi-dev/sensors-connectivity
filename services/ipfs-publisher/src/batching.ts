@@ -1,30 +1,44 @@
-import {
-  TELEMETRY_TOPICS,
-  type Envelope,
-  type TelemetryAuthorizedPayload
-} from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { TELEMETRY_TOPICS, type TelemetryAuthorizedPayload } from '@scp/core';
 import { canonicalize } from 'json-canonicalize';
 import { createHash } from 'node:crypto';
 
-export type AuthorizedTelemetryEnvelope = Envelope & {
-  event_type: typeof TELEMETRY_TOPICS.AUTHORIZED;
+export interface AuthorizedTelemetryEnvelope {
+  eventId: string;
+  eventType: typeof TELEMETRY_TOPICS.AUTHORIZED;
+  eventVersion: string;
+  occurredAt: string;
+  traceId?: string;
+  source: string;
   payload: TelemetryAuthorizedPayload;
-};
+}
 
 export interface AuthorizedBatchEntry {
   topic: string;
   partition: number;
   offset: string;
   envelope: AuthorizedTelemetryEnvelope;
+  commitOffset?: () => Promise<void>;
 }
 
 export interface AuthorizedBatchIdContext {
   topic: string;
   partition: number;
-  entries: ReadonlyArray<{
-    offset: string;
-    eventId: string;
-  }>;
+  entries: ReadonlyArray<{ offset: string; eventId: string }>;
 }
 
 export interface SealedAuthorizedBatch {
@@ -46,7 +60,6 @@ interface OpenAuthorizedBatch {
   entries: AuthorizedBatchEntry[];
 }
 
-/** Derives a stable batch identifier from Kafka positions and ordered event identifiers. */
 export function deriveAuthorizedBatchId(
   context: AuthorizedBatchIdContext
 ): string {
@@ -59,17 +72,13 @@ export function deriveAuthorizedBatchId(
     last_offset: context.entries.at(-1)!.offset,
     events: context.entries.map((entry) => ({
       offset: entry.offset,
-      event_id: entry.eventId
-    }))
+      event_id: entry.eventId,
+    })),
   };
   const bytes = new TextEncoder().encode(canonicalize(descriptor));
   return 'batch-v1-' + createHash('sha256').update(bytes).digest('hex');
 }
 
-/**
- * Accumulates authorized events separately for each Kafka partition and seals
- * immutable batches when the configured size or wait-time limit is reached.
- */
 export class AuthorizedBatchAccumulator {
   private readonly openBatches = new Map<string, OpenAuthorizedBatch>();
 
@@ -82,7 +91,6 @@ export class AuthorizedBatchAccumulator {
     }
   }
 
-  /** Adds an event and returns a sealed batch when the size limit is reached. */
   add(
     entry: AuthorizedBatchEntry,
     receivedAt: number = Date.now()
@@ -91,59 +99,47 @@ export class AuthorizedBatchAccumulator {
     const key = partitionKey(entry.topic, entry.partition);
     const openBatch = this.openBatches.get(key) ?? {
       openedAt: receivedAt,
-      entries: []
+      entries: [],
     };
     if (openBatch.entries.some((current) => current.offset === entry.offset)) {
       throw new Error(
         `Duplicate Kafka offset ${entry.offset} for ${entry.topic} partition ${entry.partition}`
       );
     }
-
     openBatch.entries.push(entry);
     openBatch.entries.sort(compareEntriesByOffset);
     this.openBatches.set(key, openBatch);
-
-    if (openBatch.entries.length >= this.options.maxEvents) {
-      return this.seal(key, openBatch);
-    }
-    return undefined;
+    return openBatch.entries.length >= this.options.maxEvents
+      ? this.seal(key, openBatch)
+      : undefined;
   }
 
-  /** Seals and returns batches whose maximum wait time has elapsed. */
   flushExpired(now: number = Date.now()): SealedAuthorizedBatch[] {
     const sealed: SealedAuthorizedBatch[] = [];
-    for (const [key, openBatch] of this.openBatches) {
-      if (now - openBatch.openedAt >= this.options.maxWaitMs) {
-        sealed.push(this.seal(key, openBatch));
+    for (const [key, batch] of this.openBatches) {
+      if (now - batch.openedAt >= this.options.maxWaitMs) {
+        sealed.push(this.seal(key, batch));
       }
     }
     return sealed;
   }
 
-  /** Seals all open batches, for example during graceful shutdown. */
   flushAll(): SealedAuthorizedBatch[] {
     return [...this.openBatches.entries()].map(([key, batch]) =>
       this.seal(key, batch)
     );
   }
 
-  /** Returns the current number of buffered events across all partitions. */
   getBufferedEventCount(): number {
-    let count = 0;
-    for (const batch of this.openBatches.values()) {
-      count += batch.entries.length;
-    }
-    return count;
+    return [...this.openBatches.values()].reduce(
+      (count, batch) => count + batch.entries.length,
+      0
+    );
   }
 
-  private seal(
-    key: string,
-    openBatch: OpenAuthorizedBatch
-  ): SealedAuthorizedBatch {
+  private seal(key: string, batch: OpenAuthorizedBatch): SealedAuthorizedBatch {
     this.openBatches.delete(key);
-    const entries = Object.freeze(
-      openBatch.entries.map((entry) => structuredClone(entry))
-    );
+    const entries = Object.freeze(batch.entries.map(cloneEntry));
     const first = entries[0]!;
     const last = entries.at(-1)!;
     const context = {
@@ -151,39 +147,47 @@ export class AuthorizedBatchAccumulator {
       partition: first.partition,
       entries: entries.map((entry) => ({
         offset: entry.offset,
-        eventId: entry.envelope.event_id
-      }))
+        eventId: entry.envelope.eventId,
+      })),
     };
-
     return {
       batchId: deriveAuthorizedBatchId(context),
       topic: first.topic,
       partition: first.partition,
       firstOffset: first.offset,
       lastOffset: last.offset,
-      entries
+      entries,
     };
   }
 }
 
-/** Validates Kafka metadata used to derive a deterministic batch identifier. */
+function cloneEntry(entry: AuthorizedBatchEntry): AuthorizedBatchEntry {
+  return {
+    ...entry,
+    envelope: {
+      ...entry.envelope,
+      payload: {
+        ...entry.envelope.payload,
+        sensorId: new Uint8Array(entry.envelope.payload.sensorId),
+        signedEnvelope: new Uint8Array(entry.envelope.payload.signedEnvelope),
+      },
+    },
+  };
+}
+
 function validateContext(context: AuthorizedBatchIdContext): void {
-  if (context.topic.length === 0) {
+  if (context.topic.length === 0)
     throw new Error('Batch topic cannot be empty');
-  }
   if (!Number.isInteger(context.partition) || context.partition < 0) {
     throw new Error('Batch partition must be a non-negative integer');
   }
-  if (context.entries.length === 0) {
+  if (context.entries.length === 0)
     throw new Error('Cannot derive an ID for an empty batch');
-  }
-
   let previousOffset: bigint | undefined;
   for (const entry of context.entries) {
     const offset = parseOffset(entry.offset);
-    if (entry.eventId.length === 0) {
+    if (entry.eventId.length === 0)
       throw new Error('Batch event_id cannot be empty');
-    }
     if (previousOffset !== undefined && offset <= previousOffset) {
       throw new Error('Batch offsets must be strictly increasing');
     }
@@ -191,39 +195,33 @@ function validateContext(context: AuthorizedBatchIdContext): void {
   }
 }
 
-/** Validates an event before adding it to the open batch for its partition. */
 function validateEntry(entry: AuthorizedBatchEntry): void {
-  if (entry.envelope.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
+  if (entry.envelope.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
     throw new Error(
-      `Unsupported batch event type: ${entry.envelope.event_type}`
+      `Unsupported batch event type: ${entry.envelope.eventType}`
     );
   }
   validateContext({
     topic: entry.topic,
     partition: entry.partition,
-    entries: [{ offset: entry.offset, eventId: entry.envelope.event_id }]
+    entries: [{ offset: entry.offset, eventId: entry.envelope.eventId }],
   });
 }
 
-/** Parses a Kafka offset as an integer without losing 64-bit precision. */
 function parseOffset(offset: string): bigint {
-  if (!/^\d+$/.test(offset)) {
-    throw new Error(`Invalid Kafka offset: ${offset}`);
-  }
+  if (!/^\d+$/.test(offset)) throw new Error(`Invalid Kafka offset: ${offset}`);
   return BigInt(offset);
 }
 
-/** Orders entries by Kafka offset using arbitrary-precision integers. */
 function compareEntriesByOffset(
   first: AuthorizedBatchEntry,
   second: AuthorizedBatchEntry
 ): number {
-  const firstOffset = parseOffset(first.offset);
-  const secondOffset = parseOffset(second.offset);
-  return firstOffset < secondOffset ? -1 : firstOffset > secondOffset ? 1 : 0;
+  const a = parseOffset(first.offset);
+  const b = parseOffset(second.offset);
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Creates a stable Map key for a Kafka topic partition. */
 function partitionKey(topic: string, partition: number): string {
   return `${topic}:${partition}`;
 }

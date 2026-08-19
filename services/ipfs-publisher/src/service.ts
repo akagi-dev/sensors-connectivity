@@ -1,26 +1,55 @@
-import { InMemoryDedupStore, TELEMETRY_TOPICS } from '@scp/contracts';
-import { Kafka, type Consumer } from 'kafkajs';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { Consumer, Producer } from '@platformatic/kafka';
+import { TELEMETRY_TOPICS } from '@scp/core';
 import { create as createKuboRPCClient } from 'kubo-rpc-client';
 import type { Server } from 'node:http';
 import { decodeAuthorizedKafkaEnvelope } from './authorized-message.js';
 import type { IpfsBatchClient } from './batch-publisher.js';
-import { processSealedAuthorizedBatch } from './batch-processor.js';
+import {
+  InMemoryBatchDedupStore,
+  processSealedAuthorizedBatch,
+} from './batch-processor.js';
 import {
   AuthorizedBatchAccumulator,
-  type SealedAuthorizedBatch
+  type SealedAuthorizedBatch,
 } from './batching.js';
 import { loadIpfsPublisherConfig, type IpfsPublisherConfig } from './config.js';
-import { nextKafkaOffset } from './kafka-offset.js';
-import { logError, logInfo } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 import {
   createIpfsPublisherMetrics,
   startIpfsPublisherHealthServer,
-  type IpfsPublisherMetrics
+  type IpfsPublisherMetrics,
 } from './metrics.js';
 import {
   createKafkaIpfsResultPublisher,
-  type IpfsResultPublisher
+  type IpfsResultPublisher,
 } from './result-publisher.js';
+
+interface ManualKafkaMessage {
+  topic: string;
+  partition: number;
+  offset: bigint;
+  value: Buffer | null;
+  commit(): Promise<void>;
+}
+
+interface KafkaMessageStream extends AsyncIterable<ManualKafkaMessage> {
+  close(force?: boolean): Promise<void>;
+}
 
 export interface IpfsPublisherDependencies {
   ipfs?: IpfsBatchClient;
@@ -37,69 +66,71 @@ export interface IpfsPublisherService {
   getMetrics(): Readonly<IpfsPublisherMetrics>;
 }
 
-/** Creates a lifecycle-managed Kafka consumer for telemetry.authorized.v1. */
 export function createIpfsPublisherService(
   config: IpfsPublisherConfig = loadIpfsPublisherConfig(),
   dependencies: IpfsPublisherDependencies = {}
 ): IpfsPublisherService {
-  const kafka = new Kafka({
-    clientId: 'ipfs-publisher',
-    brokers: config.kafkaBrokers
-  });
   const consumer =
     dependencies.createConsumer?.() ??
-    kafka.consumer({ groupId: config.consumerGroupId });
+    new Consumer({
+      groupId: config.consumerGroupId,
+      clientId: 'ipfs-publisher',
+      bootstrapBrokers: config.kafkaBrokers,
+    });
   const ipfs =
     dependencies.ipfs ??
     (createKuboRPCClient(config.ipfsApiUrl) as unknown as IpfsBatchClient);
   const resultPublisher =
     dependencies.resultPublisher ??
-    createKafkaIpfsResultPublisher(kafka.producer());
+    createKafkaIpfsResultPublisher(
+      new Producer({
+        clientId: 'ipfs-publisher',
+        bootstrapBrokers: config.kafkaBrokers,
+        idempotent: true,
+        acks: -1,
+      })
+    );
   const createHealthServer =
     dependencies.createHealthServer ?? startIpfsPublisherHealthServer;
-  const dedupStore = new InMemoryDedupStore();
+  const dedupStore = new InMemoryBatchDedupStore();
   const metrics = createIpfsPublisherMetrics();
-  const batchAccumulator = new AuthorizedBatchAccumulator({
+  const batches = new AuthorizedBatchAccumulator({
     maxEvents: config.batchMaxEvents,
-    maxWaitMs: config.batchMaxWaitMs
+    maxWaitMs: config.batchMaxWaitMs,
   });
-  const pendingBatchProcessing = new Set<Promise<void>>();
+  const pending = new Set<Promise<void>>();
   let started = false;
   let runPromise: Promise<void> | undefined;
   let flushTimer: NodeJS.Timeout | undefined;
   let healthServer: Server | undefined;
+  let consumerStream: KafkaMessageStream | undefined;
 
-  /**
-   * Starts processing a sealed batch and tracks it for graceful shutdown.
-   */
   const processBatch = (batch: SealedAuthorizedBatch): Promise<void> => {
+    const commitOffset = batch.entries.at(-1)?.commitOffset;
+    if (!commitOffset) {
+      return Promise.reject(
+        new Error(`Kafka batch ${batch.batchId} has no commit callback`)
+      );
+    }
     const promise = processSealedAuthorizedBatch(batch, {
       ipfs,
       dedupStore,
       resultPublisher,
       ipfsRetry: {
         maxAttempts: config.maxRetries,
-        backoffMs: config.retryBackoffMs
+        backoffMs: config.retryBackoffMs,
       },
       commitOffset: async () => {
-        const offset = nextKafkaOffset(batch.lastOffset);
-        await consumer.commitOffsets([
-          {
-            topic: batch.topic,
-            partition: batch.partition,
-            offset
-          }
-        ]);
+        await commitOffset();
         logInfo('Kafka batch offset committed', {
           batchId: batch.batchId,
           topic: batch.topic,
           partition: batch.partition,
           lastOffset: batch.lastOffset,
-          committedOffset: offset
         });
       },
       metrics,
-      ...(dependencies.now ? { now: dependencies.now } : {})
+      ...(dependencies.now ? { now: dependencies.now } : {}),
     }).then((status) => {
       logInfo('authorized Kafka batch handled', {
         batchId: batch.batchId,
@@ -108,25 +139,16 @@ export function createIpfsPublisherService(
         firstOffset: batch.firstOffset,
         lastOffset: batch.lastOffset,
         eventCount: batch.entries.length,
-        status
+        status,
       });
-      if (status === 'retried' || status === 'dlq') {
-        throw new Error(
-          `Kafka batch ${batch.batchId} was not committed after status ${status}`
-        );
-      }
     });
-    pendingBatchProcessing.add(promise);
-    void promise.then(
-      () => pendingBatchProcessing.delete(promise),
-      () => pendingBatchProcessing.delete(promise)
-    );
+    pending.add(promise);
+    void promise.finally(() => pending.delete(promise)).catch(() => undefined);
     return promise;
   };
 
-  /** Seals and processes all batches whose maximum wait time has elapsed. */
   const flushExpiredBatches = async (): Promise<void> => {
-    await Promise.all(batchAccumulator.flushExpired().map(processBatch));
+    await Promise.all(batches.flushExpired().map(processBatch));
   };
 
   return {
@@ -135,44 +157,47 @@ export function createIpfsPublisherService(
         logInfo('start skipped; service already started');
         return;
       }
-
       started = true;
       try {
         await resultPublisher.connect();
-        await consumer.connect();
-        await consumer.subscribe({
-          topic: TELEMETRY_TOPICS.AUTHORIZED,
-          fromBeginning: false
-        });
+        consumerStream = (await consumer.consume({
+          topics: [TELEMETRY_TOPICS.AUTHORIZED],
+          autocommit: false,
+        })) as unknown as KafkaMessageStream;
         healthServer = createHealthServer(metrics, config.healthPort);
-        runPromise = consumer.run({
-          autoCommit: false,
-          eachMessage: async ({ topic, partition, message }) => {
-            const rawMessage = message.value?.toString('utf8');
-            if (rawMessage === undefined) {
-              throw new Error('Kafka message value is empty');
+        runPromise = (async () => {
+          for await (const message of consumerStream!) {
+            if (!message.value) {
+              logWarn(
+                'received null Kafka message value; committing and skipping',
+                {
+                  topic: message.topic,
+                  partition: message.partition,
+                  offset: message.offset,
+                }
+              );
+              await message.commit();
+              continue;
             }
-
-            const envelope = decodeAuthorizedKafkaEnvelope(rawMessage);
-            const sealedBatch = batchAccumulator.add({
-              topic,
-              partition,
-              offset: message.offset,
-              envelope
+            const envelope = decodeAuthorizedKafkaEnvelope(message.value);
+            const sealedBatch = batches.add({
+              topic: message.topic,
+              partition: message.partition,
+              offset: message.offset.toString(),
+              envelope,
+              commitOffset: () => message.commit(),
             });
-            if (sealedBatch) {
-              await processBatch(sealedBatch);
-            }
+            if (sealedBatch) await processBatch(sealedBatch);
             logInfo('authorized Kafka message buffered', {
-              topic,
-              partition,
+              topic: message.topic,
+              partition: message.partition,
               offset: message.offset,
               batchId: sealedBatch?.batchId,
-              bufferedEventCount: batchAccumulator.getBufferedEventCount(),
-              status: sealedBatch ? 'sealed' : 'buffered'
+              bufferedEventCount: batches.getBufferedEventCount(),
+              status: sealedBatch ? 'sealed' : 'buffered',
             });
           }
-        });
+        })();
         void runPromise.catch((error: unknown) => {
           logError('Kafka consumer loop failed', error);
         });
@@ -194,77 +219,95 @@ export function createIpfsPublisherService(
           maxRetries: config.maxRetries,
           retryBackoffMs: config.retryBackoffMs,
           ipfsApiUrl: config.ipfsApiUrl,
-          healthPort: config.healthPort
+          healthPort: config.healthPort,
         });
       } catch (error) {
         started = false;
-        if (flushTimer) {
-          clearInterval(flushTimer);
-          flushTimer = undefined;
+        clearFlushTimer();
+        await closeHttpServerIfPresent();
+        await consumerStream?.close(true).catch(() => undefined);
+        try {
+          await consumer.close(true);
+        } catch {
+          // Best-effort rollback; preserve the original startup error.
         }
-        runPromise = undefined;
-        if (healthServer) {
-          await closeHttpServer(healthServer).catch(() => undefined);
-          healthServer = undefined;
-        }
-        await consumer.disconnect().catch(() => undefined);
         await resultPublisher.disconnect().catch(() => undefined);
+        consumerStream = undefined;
+        runPromise = undefined;
         logError('Kafka consumer failed to start', error);
         throw error;
       }
     },
-    async stop(): Promise<void> {
-      if (!started) {
-        return;
-      }
 
+    async stop(): Promise<void> {
+      if (!started) return;
       started = false;
-      if (flushTimer) {
-        clearInterval(flushTimer);
-        flushTimer = undefined;
-      }
-      await consumer.stop();
-      await runPromise?.catch(() => undefined);
-      await Promise.all(batchAccumulator.flushAll().map(processBatch));
-      await Promise.all(pendingBatchProcessing);
-      if (healthServer) {
-        await closeHttpServer(healthServer);
-        healthServer = undefined;
-      }
-      await consumer.disconnect();
-      await resultPublisher.disconnect();
+      clearFlushTimer();
+      let firstError: unknown;
+      const runCleanup = async (
+        operation: () => Promise<unknown>
+      ): Promise<void> => {
+        try {
+          await operation();
+        } catch (error) {
+          firstError ??= error;
+        }
+      };
+
+      await runCleanup(
+        async () => consumerStream?.close() ?? Promise.resolve()
+      );
+      await runCleanup(async () => runPromise ?? Promise.resolve());
+      await runCleanup(async () =>
+        Promise.all(batches.flushAll().map(processBatch))
+      );
+      await runCleanup(async () => Promise.all(pending));
+      await runCleanup(closeHttpServerIfPresent);
+      await runCleanup(async () => consumer.close(true));
+      await runCleanup(async () => resultPublisher.disconnect());
+
+      consumerStream = undefined;
       runPromise = undefined;
       logInfo('Kafka consumer stopped', {
         batchCount: metrics.batchCount,
         pinCount: metrics.pinCount,
         pinLatencyMs: metrics.pinLatencyMs,
         retryCount: metrics.retryCount,
-        dlqCount: metrics.dlqCount
+        dlqCount: metrics.dlqCount,
       });
+      if (firstError) throw firstError;
     },
+
     isStarted(): boolean {
       return started;
     },
+
     getMetrics(): Readonly<IpfsPublisherMetrics> {
       return metrics;
-    }
+    },
   };
+
+  function clearFlushTimer(): void {
+    if (flushTimer) {
+      clearInterval(flushTimer);
+      flushTimer = undefined;
+    }
+  }
+
+  async function closeHttpServerIfPresent(): Promise<void> {
+    if (!healthServer) return;
+    const server = healthServer;
+    healthServer = undefined;
+    await closeHttpServer(server);
+  }
 }
 
-/** Closes an HTTP server and waits for its socket to be released. */
 async function closeHttpServer(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    });
+    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
 
-/** Creates and starts the IPFS publisher service with default settings. */
 export async function startIpfsPublisher(
   dependencies: IpfsPublisherDependencies = {}
 ): Promise<IpfsPublisherService> {
