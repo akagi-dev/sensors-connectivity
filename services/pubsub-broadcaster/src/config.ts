@@ -6,7 +6,7 @@ export interface PubsubBroadcasterConfig {
   maxRetries: number;
   retryBackoffMs: number;
   pubsubTopic: string;
-  reservedPeers: string[];
+  ipfsApiUrl: string;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -14,18 +14,9 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function parseCsvEnv(value: string | undefined): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-}
-
-export function loadPubsubBroadcasterConfig(env: NodeJS.ProcessEnv = process.env): PubsubBroadcasterConfig {
+export function loadPubsubBroadcasterConfig(
+  env: NodeJS.ProcessEnv = process.env
+): PubsubBroadcasterConfig {
   return {
     kafkaBrokers: (env.KAFKA_BROKERS ?? 'localhost:9092')
       .split(',')
@@ -35,8 +26,11 @@ export function loadPubsubBroadcasterConfig(env: NodeJS.ProcessEnv = process.env
     source: env.PUBSUB_BROADCASTER_SOURCE ?? 'pubsub-broadcaster',
     healthPort: parsePositiveInt(env.PUBSUB_BROADCASTER_HEALTH_PORT, 3020),
     maxRetries: parsePositiveInt(env.PUBSUB_BROADCASTER_MAX_RETRIES, 3),
-    retryBackoffMs: parsePositiveInt(env.PUBSUB_BROADCASTER_RETRY_BACKOFF_MS, 250),
-    pubsubTopic: env.PUBSUB_TOPIC ?? 'telemetry/authorized/v1',
-    reservedPeers: parseCsvEnv(env.PUBSUB_RESERVED_PEERS)
+    retryBackoffMs: parsePositiveInt(
+      env.PUBSUB_BROADCASTER_RETRY_BACKOFF_MS,
+      250
+    ),
+    pubsubTopic: env.PUBSUB_TOPIC ?? 'sensors.social/telemetry/v1',
+    ipfsApiUrl: env.IPFS_API_URL ?? 'http://localhost:5001',
   };
 }

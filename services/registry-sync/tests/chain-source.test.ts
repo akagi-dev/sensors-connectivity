@@ -12,15 +12,15 @@ describe('normalizeRegistryEvents', () => {
           data: {
             toJSON: () => ({
               sensor_id: 'sensor-1',
-              enabled: true
-            })
-          }
+              enabled: true,
+            }),
+          },
         },
         phase: {
           isApplyExtrinsic: true,
-          asApplyExtrinsic: { toNumber: () => 3 }
-        }
-      }
+          asApplyExtrinsic: { toNumber: () => 3 },
+        },
+      },
     ];
 
     const normalized = normalizeRegistryEvents(records as never, 120);
@@ -35,9 +35,9 @@ describe('normalizeRegistryEvents', () => {
         enabled: true,
         rawData: {
           sensor_id: 'sensor-1',
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     ]);
   });
 
@@ -47,13 +47,13 @@ describe('normalizeRegistryEvents', () => {
         event: {
           section: 'balances',
           method: 'Transfer',
-          data: { toJSON: () => ({ from: 'a', to: 'b' }) }
+          data: { toJSON: () => ({ from: 'a', to: 'b' }) },
         },
         phase: {
           isApplyExtrinsic: false,
-          asApplyExtrinsic: { toNumber: () => 0 }
-        }
-      }
+          asApplyExtrinsic: { toNumber: () => 0 },
+        },
+      },
     ];
 
     expect(normalizeRegistryEvents(records as never, 121)).toEqual([]);
@@ -72,15 +72,15 @@ describe('normalizeRegistryEvents', () => {
           method: 'NewDevices',
           data: {
             toJSON: () => ({
-              devices: [fixtureA, fixtureB]
-            })
-          }
+              devices: [fixtureA, fixtureB],
+            }),
+          },
         },
         phase: {
           isApplyExtrinsic: true,
-          asApplyExtrinsic: { toNumber: () => 4 }
-        }
-      }
+          asApplyExtrinsic: { toNumber: () => 4 },
+        },
+      },
     ];
 
     const normalized = normalizeRegistryEvents(records as never, 140);

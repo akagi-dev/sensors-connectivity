@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package connectivity.v1;
+
+// TelemetryAuthorizedPayload is emitted when sensor telemetry passes validation.
+message TelemetryAuthorizedPayload {
+  // 32-byte sensor public key (Ed25519)
+  bytes sensor_id = 1;
+  
+  // Raw message from sensor 
+  bytes signed_envelope = 2;
+}
+
+// TelemetryRejectedPayload is emitted when sensor telemetry fails validation.
+message TelemetryRejectedPayload {
+  // Optional sensor ID (may be missing if signature invalid)
+  optional bytes sensor_id = 1;
+  
+  // Machine-readable rejection code
+  uint32 reason_code = 2;
+  
+  // Optional human-readable message
+  string reason_message = 3;
+}
+
+// TelemetryIpfsPublishedPayload is emitted when events are published to IPFS.
+message TelemetryIpfsPublishedPayload {
+  // IPFS Content ID
+  bytes cid = 1;
+  
+  // Number of events in this batch
+  uint32 event_count = 2;
+}
+
+// TelemetryPubsubResultPayload is emitted after attempting PubSub broadcast.
+message TelemetryPubsubResultPayload {
+  // Status of the PubSub publish operation
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SUBMITTED = 1;
+    STATUS_FAILED = 2;
+  }
+  
+  Status status = 1;
+  
+  // Sensor ID that generated this telemetry
+  bytes sensor_id = 2;
+  
+  // Optional error code if failed
+  optional uint32 error_code = 3;
+  
+  // Optional error message if failed
+  optional string error_message = 4;
+}
+
+// TelemetryBlockchainResultPayload is emitted after blockchain anchoring.
+message TelemetryBlockchainResultPayload {
+  // Status of the blockchain anchoring operation
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_SUBMITTED = 1;
+    STATUS_FAILED = 2;
+  }
+  
+  Status status = 1;
+  
+  // IPFS CID that was anchored
+  bytes cid = 2;
+  
+  // Optional transaction hash (may be missing if failed)
+  optional bytes tx_hash = 3;
+  
+  // Optional error code if failed
+  optional uint32 error_code = 4;
+  
+  // Optional error message if failed
+  optional string error_message = 5;
+}

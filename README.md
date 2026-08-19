@@ -1,25 +1,25 @@
 # Sensors.social Connectivity monorepo
 
-TypeScript monorepo scaffold for the telemetry pipeline described in:
+TypeScript monorepo for the event-driven telemetry pipeline described in:
 
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00 through WP-03 are implemented (`contracts`, `registry-sync`, `authorizer`, `pubsub-broadcaster`). WP-04 and WP-05 remain scaffolded.
+> Current phase: WP-00 through WP-03 are fully implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`, `heartbeat-tracker`). WP-04 (`ipfs-publisher`) and WP-05 (`blockchain-anchor`) remain scaffolded.
 
 ## Stack
 
-- Node.js 20 LTS + TypeScript (strict)
+- Node.js 22+ LTS + TypeScript (strict mode with extra-strict flags)
 - pnpm workspaces + Turborepo
-- Fastify, kafkajs, zod
-- `@noble/ed25519`, `json-canonicalize`, node `crypto`
-- `kubo-rpc-client`, libp2p + GossipSub, `@polkadot/api`, ioredis
 - tsup, vitest, eslint, prettier
+- Protobuf-es (`@bufbuild/protobuf`)
+- `@polkadot/util-crypto`, `@polkadot/api`, 
+- `kubo-rpc-client`, `ioredis`, `@platformatic/kafka`, Fastify
 
 ## Prerequisites
 
-- Node.js 20 (`.nvmrc`)
-- pnpm 9+
+- Node.js 22+ (`.nvmrc`)
+- pnpm 11+
 - Docker + Docker Compose
 
 ## Install and run
@@ -43,21 +43,23 @@ pnpm dev
 ## Workspace layout
 
 ```text
-packages/contracts         # @scp/contracts shared schemas/types/helpers
-services/authorizer        # POST /v1/telemetry ingress stub
-services/registry-sync     # substrate->redis projection sync service
-services/pubsub-broadcaster
-services/heartbeat-tracker  # online-sensor liveness & uptime metrics from trusted events
-services/ipfs-publisher
-services/blockchain-anchor # phase-1 CID-only anchoring stub
-tools/fake-sensor-cli      # fake telemetry sender for debug/tests
+packages/contracts         # @scp/contracts - shared schemas, types, validation, consumer runtime
+services/endpoint          # POST /v1/telemetry ingress - protobuf validation, signature verification
+services/registry-sync     # Robonomics blockchain→Redis projection sync service
+services/whitelist         # Whitelist-based sensor authentication provider
+services/pubsub-broadcaster # Kafka→libp2p GossipSub bridge for real-time web UI
+services/heartbeat-tracker  # Observability: sensor liveness & uptime metrics
+services/ipfs-publisher    # Kafka→IPFS publisher (batches, produces CIDs)
+services/blockchain-anchor # IPFS CID→blockchain anchoring (stubbed)
+tools/fake-sensor-cli      # Generate test telemetry with Ed25519 signatures
 ```
 
 ## Per-service development
 
 ```bash
-pnpm --filter @scp/authorizer dev
+pnpm --filter @scp/endpoint dev
 pnpm --filter @scp/registry-sync dev
+pnpm --filter @scp/whitelist dev
 pnpm --filter @scp/pubsub-broadcaster dev
 pnpm --filter @scp/heartbeat-tracker dev
 pnpm --filter @scp/ipfs-publisher dev
@@ -94,16 +96,75 @@ Available options:
 - `--count <n>` (env: `SENSOR_FAKE_COUNT`, default: `1`)
 - `--interval-ms <ms>` (env: `SENSOR_FAKE_INTERVAL_MS`, default: `1000`)
 
-The CLI now sends authorizer-compatible payloads (`sensor_id`, `timestamp`, `nonce`, `measurements`, `signature`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+The CLI now sends binary protobuf `crypto.v1.SignedEnvelope` (`Content-Type: application/protobuf`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
+
+## Kafka Message Format
+
+All Kafka messages use **binary protobuf encoding** with the following envelope structure:
+
+```protobuf
+message Envelope {
+  string event_id = 1;        // Unique event identifier (UUID)
+  string event_type = 2;      // e.g., "telemetry.authorized.v1"
+  string event_version = 3;   // Schema version
+  string occurred_at = 4;     // RFC3339 timestamp with timezone
+  optional string trace_id = 5; // Distributed tracing ID
+  string source = 6;          // Originating service name
+  bytes payload = 7;          // Event-specific protobuf payload
+}
+```
+
+### Event Types and Payloads
+
+| Event Type | Payload Schema | Description |
+|------------|---------------|-------------|
+| `telemetry.authorized.v1` | `TelemetryAuthorizedPayload` | Successfully validated sensor telemetry |
+| `telemetry.rejected.v1` | `TelemetryRejectedPayload` | Failed validation with rejection reason |
+| `telemetry.pubsub.result.v1` | `TelemetryPubsubResultPayload` | PubSub broadcast result |
+| `telemetry.ipfs.result.v1` | `TelemetryIpfsPublishedPayload` | IPFS publish result with CID |
+| `telemetry.blockchain.result.v1` | `TelemetryBlockchainResultPayload` | Blockchain anchoring result |
+
+### Rejection Reason Codes
+
+When telemetry validation fails, the endpoint emits `telemetry.rejected.v1` events with one of these reason codes:
+
+| Code | Constant | Description |
+|------|----------|-------------|
+| 1 | `STALE_TIMESTAMP` | Timestamp is outside the allowed clock skew window |
+| 2 | `SENSOR_FORBIDDEN` | Sensor is not registered or has been disabled |
+| 3 | `DUPLICATE_NONCE` | Nonce has already been used (replay attack prevention) |
+| 4 | `INVALID_SIGNATURE` | Ed25519 signature verification failed |
+| 999 | `KAFKA_PUBLISH_FAILED` | Internal error: Kafka publish failed after retries |
+
+Use `REJECTION_CODES` from `@scp/contracts` to reference these codes in your code:
+
+```typescript
+import { REJECTION_CODES, getRejectionCodeDescription } from '@scp/contracts';
+
+// Check rejection reason
+if (payload.reasonCode === REJECTION_CODES.INVALID_SIGNATURE) {
+  console.error('Signature verification failed');
+}
+
+// Get human-readable description
+const description = getRejectionCodeDescription(payload.reasonCode);
+```
+
+
+## Protocol assets
+
+- Buf module: `buf.build/airalab/sensors-social-proto`
+- Generated SDK package: `@buf/airalab_sensors-social-proto.bufbuild_es`
 
 ## Service overview
 
-- **authorizer**: validates `POST /v1/telemetry`, applies timestamp/nonce/signature/registry checks, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK.
-- **registry-sync**: consumes finalized Robonomics/substrate registry events and projects sensor/key authorization state into Redis for Authorizer reads.
-- **pubsub-broadcaster**: consumes `telemetry.authorized.v1`, validates contracts, publishes to GossipSub (with optional reserved peers), emits `telemetry.pubsub.result.v1`, and routes exhausted failures to DLQ.
-- **heartbeat-tracker**: consumes trusted `telemetry.authorized.v1`, stores per-sensor first/last seen plus continuous uptime streaks in Redis, and exposes `sensors_online` + uptime metrics over a configurable online window (default 30s).
-- **ipfs-publisher**: consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
-- **blockchain-anchor**: consumes `telemetry.ipfs.result.v1`, dedups by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring.
+- **endpoint**: Validates `POST /v1/telemetry` (protobuf `crypto.v1.SignedEnvelope`), verifies Ed25519 signatures, checks sensor authorization via Redis projection, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK. Supports pluggable authentication strategies (registry-sync or whitelist).
+- **registry-sync**: Consumes finalized Robonomics blockchain events, projects sensor/key authorization state to Redis for endpoint lookups.
+- **whitelist**: Alternative authentication provider - maintains static sensor whitelist in Redis, bypassing blockchain dependency for simpler deployments.
+- **pubsub-broadcaster**: Consumes `telemetry.authorized.v1`, publishes to libp2p/GossipSub for real-time web UI, emits `telemetry.pubsub.result.v1`, routes exhausted failures to DLQ.
+- **heartbeat-tracker**: Observability-only consumer of `telemetry.authorized.v1`, tracks sensor liveness (`firstSeen`, `lastSeen`, `onlineSince`) in Redis, exposes `sensors_online` count and per-sensor/aggregate uptime metrics over configurable online window (default 30s). Does not emit result events or participate in retry/DLQ.
+- **ipfs-publisher**: Consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
+- **blockchain-anchor**: Consumes `telemetry.ipfs.result.v1`, deduplicates by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring (stubbed).
 
 ## Local infrastructure
 

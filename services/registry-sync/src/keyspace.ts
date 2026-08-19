@@ -32,19 +32,24 @@ export interface RedisKeyspace {
 export function createRedisKeyspace(prefix: string): RedisKeyspace {
   return {
     sensorState: (sensorId: string) => `${prefix}:sensor:${sensorId}`,
-    nonceState: (sensorId: string, nonce: string) => `${prefix}:nonce:${sensorId}:${nonce}`,
+    nonceState: (sensorId: string, nonce: string) =>
+      `${prefix}:nonce:${sensorId}:${nonce}`,
     processedEvents: `${prefix}:events:processed`,
     cursorHeight: `${prefix}:cursor:finalized-height`,
     dlqEvents: `${prefix}:dlq:events`,
-    retryAttempts: (eventId: string) => `${prefix}:retry:${eventId}`
+    retryAttempts: (eventId: string) => `${prefix}:retry:${eventId}`,
   };
 }
 
-export function toChainEventId(event: Pick<RegistryEvent, 'blockHeight' | 'eventIndex'>): string {
+export function toChainEventId(
+  event: Pick<RegistryEvent, 'blockHeight' | 'eventIndex'>
+): string {
   return `${event.blockHeight}:${event.eventIndex}`;
 }
 
-export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate | null {
+export function mapRegistryEventToUpdate(
+  event: RegistryEvent
+): ProjectionUpdate | null {
   const sensorId = event.sensorId?.trim();
   if (!sensorId) {
     return null;
@@ -66,13 +71,14 @@ export function mapRegistryEventToUpdate(event: RegistryEvent): ProjectionUpdate
     normalizedMethod.includes('set');
 
   const enabled =
-    explicitEnabled ?? (impliedDisabled ? false : impliedEnabled ? true : undefined);
+    explicitEnabled ??
+    (impliedDisabled ? false : impliedEnabled ? true : undefined);
   if (typeof enabled !== 'boolean') {
     return null;
   }
 
   return {
     sensorId,
-    enabled
+    enabled,
   };
 }

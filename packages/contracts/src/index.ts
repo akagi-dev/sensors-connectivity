@@ -1,5 +1,12 @@
+// Re-export modules
+export * from './cid-encoding.js';
 export * from './consumer-runtime.js';
-export * from './envelope.js';
-export * from './events.js';
-export * from './topics.js';
 export * from './validation.js';
+export * from './utils.js';
+export * from './rejection-codes.js';
+export * from './sensor-auth.js';
+export * from './topics.js';
+
+// Re-export generated protobuf schemas
+export * from './generated/connectivity/v1/envelope_pb.js';
+export * from './generated/connectivity/v1/payload_pb.js';

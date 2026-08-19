@@ -1,17 +1,22 @@
 import Redis from 'ioredis';
+import type { SensorAuth } from '@scp/contracts';
 import { loadRegistrySyncConfig } from './config.js';
 import { createRedisKeyspace } from './keyspace.js';
 import { RedisProjectionStore, type RedisLike } from './projection-store.js';
 
 export interface SensorRegistryRecord {
-  sensorId: string;
+  sensorId: Uint8Array;
   enabled: boolean;
 }
 
-export interface RegistryReader {
-  getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null>;
-  isNonceSeen(sensorId: string, nonce: string): Promise<boolean>;
-  rememberNonce(sensorId: string, nonce: string): Promise<void>;
+export interface RegistryReader extends SensorAuth {
+  getSensorRecord(sensorId: Uint8Array): Promise<SensorRegistryRecord | null>;
+  isNonceSeen(sensorId: Uint8Array, nonce: Uint8Array): Promise<boolean>;
+  rememberNonce(sensorId: Uint8Array, nonce: Uint8Array): Promise<void>;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
 }
 
 export class InMemoryRegistryReader implements RegistryReader {
@@ -20,20 +25,27 @@ export class InMemoryRegistryReader implements RegistryReader {
 
   constructor(seed: SensorRegistryRecord[] = []) {
     seed.forEach((record) => {
-      this.sensors.set(record.sensorId, record);
+      this.sensors.set(toHex(record.sensorId), record);
     });
   }
 
-  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
-    return this.sensors.get(sensorId) ?? null;
+  async authenticate(sensorId: Uint8Array): Promise<boolean> {
+    const record = await this.getSensorRecord(sensorId);
+    return record !== null && record.enabled;
   }
 
-  async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
-    return this.seenNonces.has(`${sensorId}:${nonce}`);
+  async getSensorRecord(
+    sensorId: Uint8Array
+  ): Promise<SensorRegistryRecord | null> {
+    return this.sensors.get(toHex(sensorId)) ?? null;
   }
 
-  async rememberNonce(sensorId: string, nonce: string): Promise<void> {
-    this.seenNonces.add(`${sensorId}:${nonce}`);
+  async isNonceSeen(sensorId: Uint8Array, nonce: Uint8Array): Promise<boolean> {
+    return this.seenNonces.has(`${toHex(sensorId)}:${toHex(nonce)}`);
+  }
+
+  async rememberNonce(sensorId: Uint8Array, nonce: Uint8Array): Promise<void> {
+    this.seenNonces.add(`${toHex(sensorId)}:${toHex(nonce)}`);
   }
 }
 
@@ -45,27 +57,42 @@ export class RedisRegistryReader implements RegistryReader {
     redisKeyPrefix: string,
     private readonly nonceTtlSeconds: number
   ) {
-    this.projectionStore = new RedisProjectionStore(redis, createRedisKeyspace(redisKeyPrefix));
+    this.projectionStore = new RedisProjectionStore(
+      redis,
+      createRedisKeyspace(redisKeyPrefix)
+    );
   }
 
-  async getSensorRecord(sensorId: string): Promise<SensorRegistryRecord | null> {
-    const record = await this.projectionStore.readSensor(sensorId);
+  async authenticate(sensorId: Uint8Array): Promise<boolean> {
+    const record = await this.getSensorRecord(sensorId);
+    return record !== null && record.enabled;
+  }
+
+  async getSensorRecord(
+    sensorId: Uint8Array
+  ): Promise<SensorRegistryRecord | null> {
+    const sensorIdHex = toHex(sensorId);
+    const record = await this.projectionStore.readSensor(sensorIdHex);
     if (!record) {
       return null;
     }
 
     return {
-      sensorId: record.sensorId,
-      enabled: record.enabled
+      sensorId,
+      enabled: record.enabled,
     };
   }
 
-  async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
-    return this.projectionStore.isNonceSeen(sensorId, nonce);
+  async isNonceSeen(sensorId: Uint8Array, nonce: Uint8Array): Promise<boolean> {
+    return this.projectionStore.isNonceSeen(toHex(sensorId), toHex(nonce));
   }
 
-  async rememberNonce(sensorId: string, nonce: string): Promise<void> {
-    await this.projectionStore.rememberNonce(sensorId, nonce, this.nonceTtlSeconds);
+  async rememberNonce(sensorId: Uint8Array, nonce: Uint8Array): Promise<void> {
+    await this.projectionStore.rememberNonce(
+      toHex(sensorId),
+      toHex(nonce),
+      this.nonceTtlSeconds
+    );
   }
 }
 
@@ -80,6 +107,10 @@ export function createRegistryReaderFromEnv(): RegistryReader {
   const config = loadRegistrySyncConfig();
   const RedisClient = Redis as unknown as RedisConstructor;
   const redis = new RedisClient(config.redisUrl);
-  sharedRedisReader = new RedisRegistryReader(redis, config.redisKeyPrefix, config.nonceTtlSeconds);
+  sharedRedisReader = new RedisRegistryReader(
+    redis,
+    config.redisKeyPrefix,
+    config.nonceTtlSeconds
+  );
   return sharedRedisReader;
 }

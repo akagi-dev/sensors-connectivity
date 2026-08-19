@@ -1,0 +1,72 @@
+import { encodeAddress } from '@polkadot/util-crypto';
+import { fromBinary } from '@bufbuild/protobuf';
+import {
+  SignedEnvelopeSchema,
+  type SignedEnvelope,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+
+export const SENSOR_ID_LENGTH = 32;
+export const SIGNATURE_LENGTH = 64;
+export const MIN_NONCE_LENGTH = 16;
+export const MAX_NONCE_LENGTH = 32;
+
+export function timestampToLeBytes(timestamp: bigint): Uint8Array {
+  const out = new Uint8Array(8);
+  new DataView(out.buffer).setBigUint64(0, timestamp, true);
+  return out;
+}
+
+export function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+export function buildEnvelopeSigningBytes(
+  envelope: Pick<SignedEnvelope, 'sensorId' | 'timestamp' | 'nonce' | 'message'>
+): Uint8Array {
+  return concatBytes([
+    envelope.sensorId,
+    timestampToLeBytes(envelope.timestamp),
+    envelope.nonce,
+    envelope.message,
+  ]);
+}
+
+/**
+ * Parse and validate SignedEnvelope from protobuf bytes.
+ * Uses generated @bufbuild/protobuf code for parsing.
+ */
+export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
+  const envelope = fromBinary(SignedEnvelopeSchema, bytes);
+  if (envelope.sensorId.length !== SENSOR_ID_LENGTH) {
+    throw new Error(`sensor_id must be ${SENSOR_ID_LENGTH} bytes`);
+  }
+  if (envelope.signature.length !== SIGNATURE_LENGTH) {
+    throw new Error(`signature must be ${SIGNATURE_LENGTH} bytes`);
+  }
+  if (
+    envelope.nonce.length < MIN_NONCE_LENGTH ||
+    envelope.nonce.length > MAX_NONCE_LENGTH
+  ) {
+    throw new Error(
+      `nonce must be ${MIN_NONCE_LENGTH}-${MAX_NONCE_LENGTH} bytes`
+    );
+  }
+  if (envelope.message.length === 0) {
+    throw new Error('message must be non-empty');
+  }
+  return envelope;
+}
+
+/**
+ * Format sensor ID bytes as SS58 address.
+ */
+export function formatSensorId(sensorId: Uint8Array): string {
+  return encodeAddress(sensorId, 32);
+}

@@ -1,9 +1,19 @@
 import type { RetryCounterStore } from '@scp/contracts';
-import type { RegistryProjectionRecord, ProjectionUpdate, RedisKeyspace } from './keyspace.js';
+import type {
+  RegistryProjectionRecord,
+  ProjectionUpdate,
+  RedisKeyspace,
+} from './keyspace.js';
 
 export interface RedisLike {
   get(key: string): Promise<string | null>;
-  set(key: string, value: string, mode?: string, duration?: number, flag?: string): Promise<unknown>;
+  set(
+    key: string,
+    value: string,
+    mode?: string,
+    duration?: number,
+    flag?: string
+  ): Promise<unknown>;
   eval?(script: string, numkeys: number, ...args: string[]): Promise<unknown>;
   exists(key: string): Promise<number>;
   sadd(key: string, member: string): Promise<number>;
@@ -49,7 +59,12 @@ if (currentNumber == nil or next > currentNumber) then
 end
 return 0
 `;
-      await this.redis.eval(script, 1, this.keyspace.cursorHeight, String(height));
+      await this.redis.eval(
+        script,
+        1,
+        this.keyspace.cursorHeight,
+        String(height)
+      );
       return;
     }
 
@@ -60,7 +75,9 @@ return 0
   }
 
   async hasProcessed(eventId: string): Promise<boolean> {
-    return (await this.redis.sismember(this.keyspace.processedEvents, eventId)) === 1;
+    return (
+      (await this.redis.sismember(this.keyspace.processedEvents, eventId)) === 1
+    );
   }
 
   async markProcessed(eventId: string): Promise<void> {
@@ -75,7 +92,7 @@ return 0
       sensor_id: update.sensorId,
       enabled: String(update.enabled),
       updated_at_block: String(context.updatedAtBlock),
-      updated_at_event: context.updatedAtEvent
+      updated_at_event: context.updatedAtEvent,
     });
   }
 
@@ -89,16 +106,28 @@ return 0
       sensorId: entry.sensor_id,
       enabled: entry.enabled === 'true',
       updatedAtBlock: Number.parseInt(entry.updated_at_block ?? '0', 10) || 0,
-      updatedAtEvent: entry.updated_at_event ?? ''
+      updatedAtEvent: entry.updated_at_event ?? '',
     };
   }
 
   async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
-    return (await this.redis.exists(this.keyspace.nonceState(sensorId, nonce))) === 1;
+    return (
+      (await this.redis.exists(this.keyspace.nonceState(sensorId, nonce))) === 1
+    );
   }
 
-  async rememberNonce(sensorId: string, nonce: string, ttlSeconds: number): Promise<void> {
-    await this.redis.set(this.keyspace.nonceState(sensorId, nonce), '1', 'EX', ttlSeconds, 'NX');
+  async rememberNonce(
+    sensorId: string,
+    nonce: string,
+    ttlSeconds: number
+  ): Promise<void> {
+    await this.redis.set(
+      this.keyspace.nonceState(sensorId, nonce),
+      '1',
+      'EX',
+      ttlSeconds,
+      'NX'
+    );
   }
 
   async publishDlq(payload: object): Promise<void> {
@@ -118,7 +147,10 @@ export class RedisRetryCounterStore implements RetryCounterStore {
   }
 
   async setAttempts(eventId: string, attempts: number): Promise<void> {
-    await this.redis.set(this.keyspace.retryAttempts(eventId), String(attempts));
+    await this.redis.set(
+      this.keyspace.retryAttempts(eventId),
+      String(attempts)
+    );
   }
 
   async clearAttempts(eventId: string): Promise<void> {

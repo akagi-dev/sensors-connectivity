@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "composite": true,
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["tests/**/*.ts"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../registry-sync" },
+    { "path": "../whitelist" }
+  ]
+}

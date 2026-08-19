@@ -4,9 +4,8 @@ import {
   runConsumerProcessingRule,
   TELEMETRY_TOPICS,
   type RetryDlqPublisher,
-  type TelemetryIpfsPublishedPayload
+  type TelemetryIpfsPublishedPayload,
 } from '@scp/contracts';
-import { Kafka } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
@@ -14,7 +13,8 @@ import { loadBlockchainAnchorConfig } from './config.js';
 
 const logger = pino({
   name: 'blockchain-anchor',
-  level: process.env.BLOCKCHAIN_ANCHOR_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.BLOCKCHAIN_ANCHOR_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -25,11 +25,15 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
@@ -39,7 +43,10 @@ export async function startBlockchainAnchor(): Promise<void> {
   const config = loadBlockchainAnchorConfig();
 
   // TODO: wire kafkajs consumer group for telemetry.ipfs.result.v1.
-  const kafka = new Kafka({ clientId: 'blockchain-anchor', brokers: ['localhost:9092'] });
+  const kafka = new Kafka({
+    clientId: 'blockchain-anchor',
+    brokers: ['localhost:9092'],
+  });
   void kafka;
 
   // TODO: wire @polkadot/api extrinsic submission and receipt handling.
@@ -49,11 +56,19 @@ export async function startBlockchainAnchor(): Promise<void> {
 
   const retryDlqPublisher: RetryDlqPublisher<TelemetryIpfsPublishedPayload> = {
     async publishRetry(event, reason) {
-      logWarn('retry stub', { topic: TELEMETRY_TOPICS.RETRY, cid: event.cid, reason });
+      logWarn('retry stub', {
+        topic: TELEMETRY_TOPICS.RETRY,
+        cid: event.cid,
+        reason,
+      });
     },
     async publishDlq(event, reason) {
-      logWarn('dlq stub', { topic: TELEMETRY_TOPICS.DLQ, cid: event.cid, reason });
-    }
+      logWarn('dlq stub', {
+        topic: TELEMETRY_TOPICS.DLQ,
+        cid: event.cid,
+        reason,
+      });
+    },
   };
 
   await runConsumerProcessingRule(
@@ -62,7 +77,7 @@ export async function startBlockchainAnchor(): Promise<void> {
       dedup: {
         keyType: 'cid',
         getKeyValue: (event) => event.cid,
-        store: new InMemoryDedupStore()
+        store: new InMemoryDedupStore(),
       },
       performExternalAction: async (event) => {
         // TODO: submit CID-only anchor extrinsic to substrate-based Robonomics chain.
@@ -81,8 +96,8 @@ export async function startBlockchainAnchor(): Promise<void> {
           target: config.target,
           status: 'submitted' as const,
           cid: event.cid,
-          tx_hash: '0xstub'
-        }
+          tx_hash: '0xstub',
+        },
       }),
       publishResultEvent: async (result) => {
         logInfo('result stub', { result });
@@ -90,13 +105,13 @@ export async function startBlockchainAnchor(): Promise<void> {
       commitOffset: async () => {
         logInfo('commit offset stub');
       },
-      retryDlqPublisher
+      retryDlqPublisher,
     }
   );
 
   logInfo('started in phase-1 CID-only stub mode', {
     substrateWsUrl: config.substrateWsUrl,
-    target: config.target
+    target: config.target,
   });
 }
 

@@ -1,20 +1,32 @@
-import { gossipsub } from '@chainsafe/libp2p-gossipsub';
 import {
   InMemoryRetryCounterStore,
   TELEMETRY_TOPICS,
   runConsumerProcessingRule,
-  validateEnvelopeWithKnownPayload,
+  parseEnvelope,
+  parsePayloadForEventType,
+  formatSensorId,
+  createEnvelope,
+  serializePayloadForEventType,
+  TelemetryPubsubResultPayloadSchema,
+  TelemetryPubsubResultPayload_Status,
   type Envelope,
   type RetryDlqPublisher,
-  type TelemetryAuthorizedPayload
+  type TelemetryAuthorizedPayload,
 } from '@scp/contracts';
-import { Kafka, type Consumer, type EachBatchPayload, type Producer } from 'kafkajs';
+import { create } from '@bufbuild/protobuf';
+import { Consumer, Producer } from '@platformatic/kafka';
 import { createServer, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createLibp2p } from 'libp2p';
+import {
+  create as createKuboClient,
+  type KuboRPCClient,
+} from 'kubo-rpc-client';
 import pino from 'pino';
-import { loadPubsubBroadcasterConfig, type PubsubBroadcasterConfig } from './config.js';
+import {
+  loadPubsubBroadcasterConfig,
+  type PubsubBroadcasterConfig,
+} from './config.js';
 
 interface PubsubBroadcasterMetrics {
   consumed: number;
@@ -32,15 +44,16 @@ export interface PubsubBroadcasterService {
   getMetrics(): Readonly<PubsubBroadcasterMetrics>;
 }
 
-export type AuthorizedTelemetryEnvelope = Envelope & {
-  event_type: typeof TELEMETRY_TOPICS.AUTHORIZED;
+export type AuthorizedTelemetryMessage = {
+  eventId: string;
+  eventType: typeof TELEMETRY_TOPICS.AUTHORIZED;
+  traceId?: string | undefined;
   payload: TelemetryAuthorizedPayload;
 };
 
 interface PubsubClient {
   start(): Promise<void>;
   stop(): Promise<void>;
-  connectReservedPeers(peers: string[]): Promise<void>;
   publish(topic: string, data: Uint8Array): Promise<void>;
 }
 
@@ -58,9 +71,12 @@ interface EventIdStore {
 interface PubsubBroadcasterDeps {
   createPubsubClient?: () => Promise<PubsubClient>;
   createPublisher?: () => EnvelopePublisher;
-  createConsumer?: () => Consumer;
+  createConsumer?: () => Consumer<Buffer, Buffer, Buffer, Buffer>;
   idempotencyStore?: EventIdStore;
-  createHealthServer?: (metrics: PubsubBroadcasterMetrics, port: number) => Server;
+  createHealthServer?: (
+    metrics: PubsubBroadcasterMetrics,
+    port: number
+  ) => Server;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -85,9 +101,17 @@ interface ProcessingContext {
   metrics: PubsubBroadcasterMetrics;
 }
 
+interface MessageData {
+  topic: string;
+  partition: number;
+  offset: bigint;
+  value: Buffer;
+}
+
 const logger = pino({
   name: 'pubsub-broadcaster',
-  level: process.env.PUBSUB_BROADCASTER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.PUBSUB_BROADCASTER_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -98,18 +122,22 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
 }
 
 export async function processAuthorizedEnvelope(
-  envelope: AuthorizedTelemetryEnvelope,
+  message: AuthorizedTelemetryMessage,
   commitOffset: () => Promise<void>,
   context: ProcessingContext
 ): Promise<'processed' | 'duplicate' | 'dlq'> {
@@ -119,63 +147,89 @@ export async function processAuthorizedEnvelope(
   while (pending) {
     let publishStatus: 'submitted' | 'failed' = 'submitted';
     let publishError: Error | undefined;
-    const status = await runConsumerProcessingRule(envelope, {
+    const sensorIdKey = formatSensorId(message.payload.sensorId);
+
+    const status = await runConsumerProcessingRule(message, {
       retryPolicy: {
         maxAttempts: context.config.maxRetries,
-        getEventId: (current) => current.event_id,
-        store: context.retryStore
+        getEventId: (current) => current.eventId,
+        store: context.retryStore,
       },
       idempotency: {
-        getEventId: (current) => current.event_id,
+        getEventId: (current) => current.eventId,
         hasProcessed: (eventId) => context.idempotencyStore.has(eventId),
-        markProcessed: (eventId) => context.idempotencyStore.mark(eventId)
+        markProcessed: (eventId) => context.idempotencyStore.mark(eventId),
       },
       performExternalAction: async (current) => {
-        const encodedPayload = Buffer.from(JSON.stringify(current.payload));
-
         try {
-          await context.pubsub.publish(context.config.pubsubTopic, encodedPayload);
+          // Forward the original SignedEnvelope to PubSub
+          const signedEnvelopeBytes = current.payload.signedEnvelope;
+
+          const pubsubTopic = context.config.pubsubTopic;
+          await context.pubsub.publish(pubsubTopic, signedEnvelopeBytes);
+
+          publishStatus = 'submitted';
           context.metrics.publishSuccess += 1;
+
+          logInfo('telemetry published to PubSub', {
+            sensor_id: formatSensorId(current.payload.sensorId),
+            pubsub_topic: pubsubTopic,
+          });
         } catch (error) {
+          publishStatus = 'failed';
+          publishError =
+            error instanceof Error ? error : new Error(String(error));
           context.metrics.publishFailure += 1;
-          if (isTransientPublishError(error)) {
-            throw error;
+
+          // Check if error is transient and should be retried
+          if (!isTransientPublishError(error)) {
+            // Non-transient errors should not retry, but we should emit a result event
+            // before proceeding to the final commit
+            return;
           }
 
-          publishStatus = 'failed';
-          publishError = error instanceof Error ? error : new Error('Unknown publish error');
+          // Transient errors will be re-thrown to trigger retry logic
+          throw error;
         }
       },
       waitForConfirmation: async () => {},
-      emitResultEvent: async (current) => ({
-        event_id: randomUUID(),
-        event_type: TELEMETRY_TOPICS.PUBSUB_RESULT,
-        event_version: 'v1',
-        occurred_at: new Date().toISOString(),
-        trace_id: current.trace_id,
-        source: context.config.source,
-        payload: {
-          status: publishStatus,
-          pubsub_topic: context.config.pubsubTopic,
-          sensor_id: current.payload.sensor_id,
-          nonce: current.payload.nonce,
+      emitResultEvent: async (current) => {
+        const resultPayload = create(TelemetryPubsubResultPayloadSchema, {
+          status:
+            publishStatus === 'submitted'
+              ? TelemetryPubsubResultPayload_Status.SUBMITTED
+              : TelemetryPubsubResultPayload_Status.FAILED,
+          sensorId: current.payload.sensorId,
           ...(publishError
             ? {
-                error_code: 'publish_failed',
-                error_message: publishError.message
+                errorCode: 1, // Generic error code
+                errorMessage: publishError.message,
               }
-            : {})
-        }
-      }),
+            : {}),
+        });
+
+        return createEnvelope({
+          eventId: randomUUID(),
+          eventType: TELEMETRY_TOPICS.PUBSUB_RESULT,
+          eventVersion: 'v1',
+          occurredAt: new Date().toISOString(),
+          source: context.config.source,
+          traceId: current.traceId,
+          payload: serializePayloadForEventType(
+            TELEMETRY_TOPICS.PUBSUB_RESULT,
+            resultPayload
+          ),
+        });
+      },
       publishResultEvent: async (result) => {
         await context.publisher.publish(
           TELEMETRY_TOPICS.PUBSUB_RESULT,
-          `${result.payload.sensor_id}:${result.payload.nonce}`,
-          result as Envelope
+          sensorIdKey,
+          result
         );
       },
       commitOffset,
-      retryDlqPublisher: createRetryDlqPublisher(context)
+      retryDlqPublisher: createRetryDlqPublisher(context),
     });
 
     if (status === 'retried') {
@@ -186,7 +240,6 @@ export async function processAuthorizedEnvelope(
 
     if (status === 'dlq') {
       context.metrics.dlqCount += 1;
-      await commitOffset();
       finalStatus = 'dlq';
       pending = false;
       continue;
@@ -210,19 +263,34 @@ export function createPubsubBroadcasterService(
   config: PubsubBroadcasterConfig = loadPubsubBroadcasterConfig(),
   deps: PubsubBroadcasterDeps = {}
 ): PubsubBroadcasterService {
-  const kafka = new Kafka({ clientId: 'pubsub-broadcaster', brokers: config.kafkaBrokers });
-  const consumer = deps.createConsumer?.() ?? kafka.consumer({ groupId: config.consumerGroupId });
-  const publisher = deps.createPublisher?.() ?? createKafkaEnvelopePublisher(kafka.producer());
+  const consumer =
+    deps.createConsumer?.() ??
+    new Consumer({
+      groupId: config.consumerGroupId,
+      clientId: 'pubsub-broadcaster',
+      bootstrapBrokers: config.kafkaBrokers,
+    });
+  const producer =
+    deps.createPublisher?.() ??
+    createKafkaEnvelopePublisher(config.kafkaBrokers);
   const idempotencyStore = deps.idempotencyStore ?? new InMemoryEventIdStore();
   const retryStore = new InMemoryRetryCounterStore();
-  const createPubsubClient = deps.createPubsubClient ?? (() => createLibp2pPubsubClient());
-  const createHealthServer = deps.createHealthServer ?? startHealthAndMetricsServer;
-  const sleepFn = deps.sleep ?? sleep;
+  const createPubsubClient =
+    deps.createPubsubClient ??
+    (() => createIpfsPubsubClient(config.ipfsApiUrl));
+  const createHealthServer =
+    deps.createHealthServer ?? startHealthAndMetricsServer;
 
   let pubsubClient: PubsubClient | null = null;
   let started = false;
   let runPromise: Promise<void> | null = null;
   let healthServer: Server | null = null;
+  let consumerStream: AsyncIterable<{
+    topic: string;
+    partition: number;
+    offset: bigint;
+    value: Buffer;
+  }> | null = null;
   const metrics: PubsubBroadcasterMetrics = {
     consumed: 0,
     processed: 0,
@@ -230,7 +298,7 @@ export function createPubsubBroadcasterService(
     publishFailure: 0,
     retryCount: 0,
     dlqCount: 0,
-    consumerLag: 0
+    consumerLag: 0,
   };
 
   return {
@@ -245,34 +313,34 @@ export function createPubsubBroadcasterService(
         consumerGroupId: config.consumerGroupId,
         kafkaBrokers: config.kafkaBrokers,
         pubsubTopic: config.pubsubTopic,
-        reservedPeerCount: config.reservedPeers.length,
-        healthPort: config.healthPort
+        ipfsApiUrl: config.ipfsApiUrl,
+        healthPort: config.healthPort,
       });
       try {
         pubsubClient = await createPubsubClient();
         await pubsubClient.start();
-        await pubsubClient.connectReservedPeers(config.reservedPeers);
-        await publisher.connect();
-        await consumer.connect();
-        await consumer.subscribe({ topic: TELEMETRY_TOPICS.AUTHORIZED, fromBeginning: false });
+        await producer.connect();
+
+        consumerStream = await consumer.consume({
+          topics: [TELEMETRY_TOPICS.AUTHORIZED],
+          autocommit: false,
+        });
+
         healthServer = createHealthServer(metrics, config.healthPort);
 
-        runPromise = consumer.run({
-          autoCommit: false,
-          eachBatchAutoResolve: false,
-          eachBatch: async (batchPayload) => {
-            await processBatch(batchPayload, {
+        runPromise = (async () => {
+          for await (const message of consumerStream!) {
+            await processMessage(message, consumer, {
               config,
-              consumer,
               pubsub: pubsubClient!,
-              publisher,
+              publisher: producer,
               idempotencyStore,
               retryStore,
               metrics,
-              sleep: sleepFn
             });
           }
-        });
+        })();
+
         logInfo('service started');
       } catch (error) {
         logError('service failed to start', error);
@@ -288,12 +356,11 @@ export function createPubsubBroadcasterService(
           healthServer = null;
         }
 
-        await Promise.allSettled([
-          consumer.disconnect(),
-          publisher.disconnect(),
-          pubsubClient?.stop() ?? Promise.resolve()
-        ]);
+        await consumer.disconnect().catch(() => undefined);
+        await producer.disconnect().catch(() => undefined);
+        await pubsubClient?.stop().catch(() => undefined);
         pubsubClient = null;
+        consumerStream = null;
         logInfo('startup rollback complete');
         throw error;
       }
@@ -306,11 +373,11 @@ export function createPubsubBroadcasterService(
 
       started = false;
       logInfo('stopping service');
-      await consumer.stop();
       await consumer.disconnect();
-      await publisher.disconnect();
+      await producer.disconnect();
       await pubsubClient?.stop();
       pubsubClient = null;
+      consumerStream = null;
       if (healthServer) {
         await new Promise<void>((resolve, reject) => {
           healthServer?.close((error) => {
@@ -329,121 +396,125 @@ export function createPubsubBroadcasterService(
     },
     getMetrics(): Readonly<PubsubBroadcasterMetrics> {
       return metrics;
-    }
+    },
   };
 }
 
-interface BatchProcessingDeps {
-  config: PubsubBroadcasterConfig;
-  consumer: Consumer;
-  pubsub: PubsubClient;
-  publisher: EnvelopePublisher;
-  idempotencyStore: EventIdStore;
-  retryStore: InMemoryRetryCounterStore;
-  metrics: PubsubBroadcasterMetrics;
-  sleep: (ms: number) => Promise<void>;
-}
+async function processMessage(
+  message: MessageData,
+  consumer: Consumer<Buffer, Buffer, Buffer, Buffer>,
+  context: ProcessingContext
+): Promise<void> {
+  context.metrics.consumed += 1;
 
-async function processBatch(payload: EachBatchPayload, deps: BatchProcessingDeps): Promise<void> {
-  for (const message of payload.batch.messages) {
-    if (!payload.isRunning() || payload.isStale()) {
-      logWarn('batch processing halted by consumer state', {
-        topic: payload.batch.topic,
-        partition: payload.batch.partition
-      });
-      return;
-    }
-
-    deps.metrics.consumed += 1;
-    const lag = BigInt(payload.batch.highWatermark) - BigInt(message.offset) - 1n;
-    const clampedLag = lag < 0n ? 0n : lag;
-    deps.metrics.consumerLag =
-      clampedLag > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(clampedLag);
-    const commitOffset = async () => {
-      await deps.consumer.commitOffsets([
+  const commitOffset = async () => {
+    await consumer.commit({
+      offsets: [
         {
-          topic: payload.batch.topic,
-          partition: payload.batch.partition,
-          offset: incrementOffset(message.offset)
-        }
-      ]);
-      payload.resolveOffset(message.offset);
-    };
-
-    const raw = message.value?.toString('utf8') ?? '';
-    const parsed = safeJsonParse(raw);
-    if (!parsed.success) {
-      logWarn('invalid JSON payload routed to DLQ', {
-        topic: payload.batch.topic,
-        partition: payload.batch.partition,
-        offset: message.offset,
-        reason: parsed.error
-      });
-      await publishInvalidMessageDlq(raw, parsed.error, deps, commitOffset);
-      await payload.heartbeat();
-      continue;
-    }
-
-    const envelopeResult = validateEnvelopeWithKnownPayload(parsed.data);
-    if (!envelopeResult.success || envelopeResult.data.event_type !== TELEMETRY_TOPICS.AUTHORIZED) {
-      const reason = envelopeResult.success
-        ? `Unsupported event type: ${envelopeResult.data.event_type}`
-        : envelopeResult.error.message;
-      logWarn('invalid envelope routed to DLQ', {
-        topic: payload.batch.topic,
-        partition: payload.batch.partition,
-        offset: message.offset,
-        reason
-      });
-      await publishInvalidMessageDlq(parsed.data, reason, deps, commitOffset);
-      await payload.heartbeat();
-      continue;
-    }
-
-    const status = await processAuthorizedEnvelope(envelopeResult.data as AuthorizedTelemetryEnvelope, commitOffset, {
-      config: deps.config,
-      pubsub: deps.pubsub,
-      publisher: deps.publisher,
-      idempotencyStore: deps.idempotencyStore,
-      retryStore: deps.retryStore,
-      metrics: deps.metrics
+          topic: message.topic,
+          partition: message.partition,
+          offset: message.offset + 1n,
+          leaderEpoch: 0,
+        },
+      ],
     });
-    logInfo('authorized envelope handled', {
-      eventId: envelopeResult.data.event_id,
-      traceId: envelopeResult.data.trace_id,
-      status,
-      topic: payload.batch.topic,
-      partition: payload.batch.partition,
-      offset: message.offset
+  };
+
+  const msgContext = {
+    topic: message.topic,
+    partition: message.partition,
+    offset: message.offset.toString(),
+  };
+
+  // Only parse the envelope header, not the payload
+  const raw = message.value ?? Buffer.from([]);
+  let envelope;
+  try {
+    envelope = parseEnvelope(new Uint8Array(raw));
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : 'Invalid protobuf envelope';
+    logWarn('invalid envelope routed to DLQ', {
+      ...msgContext,
+      reason,
     });
-    await payload.heartbeat();
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
+    return;
   }
+
+  if (envelope.eventType !== TELEMETRY_TOPICS.AUTHORIZED) {
+    const reason = `Unsupported event type: ${envelope.eventType}`;
+    logWarn('invalid envelope routed to DLQ', {
+      ...msgContext,
+      reason,
+    });
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
+    return;
+  }
+
+  // Parse only the payload to get sensorId and signedEnvelope
+  let payload: TelemetryAuthorizedPayload;
+  try {
+    payload = parsePayloadForEventType(
+      TELEMETRY_TOPICS.AUTHORIZED,
+      envelope.payload
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Invalid payload';
+    logWarn('invalid payload routed to DLQ', {
+      ...msgContext,
+      reason,
+    });
+    await publishInvalidMessageDlq(raw, reason, context, commitOffset);
+    return;
+  }
+
+  const authorizedMessage: AuthorizedTelemetryMessage = {
+    eventId: envelope.eventId,
+    eventType: TELEMETRY_TOPICS.AUTHORIZED,
+    traceId: envelope.traceId,
+    payload,
+  };
+
+  const status = await processAuthorizedEnvelope(
+    authorizedMessage,
+    commitOffset,
+    context
+  );
+  logInfo('authorized envelope handled', {
+    eventId: envelope.eventId,
+    traceId: envelope.traceId,
+    status,
+    ...msgContext,
+  });
 }
 
 async function publishInvalidMessageDlq(
   failedPayload: unknown,
   reason: string,
-  deps: BatchProcessingDeps,
+  context: ProcessingContext,
   commitOffset: () => Promise<void>
 ): Promise<void> {
-  deps.metrics.dlqCount += 1;
-  await deps.publisher.publish(TELEMETRY_TOPICS.DLQ, 'invalid-envelope', {
+  context.metrics.dlqCount += 1;
+  await context.publisher.publish(TELEMETRY_TOPICS.DLQ, 'invalid-envelope', {
     event_id: randomUUID(),
     event_type: TELEMETRY_TOPICS.DLQ,
     event_version: 'v1',
     occurred_at: new Date().toISOString(),
-    source: deps.config.source,
+    source: context.config.source,
     payload: {
       failed_topic: TELEMETRY_TOPICS.AUTHORIZED,
       reason_code: 'invalid_envelope',
       reason_message: reason,
-      failed_payload: failedPayload
-    }
+      failed_payload: failedPayload,
+    },
   });
   await commitOffset();
 }
 
-function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<Envelope> {
+function createRetryDlqPublisher(
+  context: ProcessingContext
+): RetryDlqPublisher<Envelope> {
   return {
     publishRetry: async (event, reason, failureContext) => {
       await context.publisher.publish(TELEMETRY_TOPICS.RETRY, event.event_id, {
@@ -458,8 +529,8 @@ function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<
           reason_code: 'transient_publish_error',
           reason_message: reason,
           failed_event: event,
-          context: failureContext
-        }
+          context: failureContext,
+        },
       });
     },
     publishDlq: async (event, reason, failureContext) => {
@@ -475,10 +546,10 @@ function createRetryDlqPublisher(context: ProcessingContext): RetryDlqPublisher<
           reason_code: 'publish_failed',
           reason_message: reason,
           failed_event: event,
-          context: failureContext
-        }
+          context: failureContext,
+        },
       });
-    }
+    },
   };
 }
 
@@ -493,7 +564,7 @@ function startHealthAndMetricsServer(
       response.end(
         JSON.stringify({
           status: 'ok',
-          consumer_lag: metrics.consumerLag
+          consumer_lag: metrics.consumerLag,
         })
       );
       return;
@@ -513,130 +584,79 @@ function startHealthAndMetricsServer(
   return server;
 }
 
-function createKafkaEnvelopePublisher(producer: Producer): EnvelopePublisher {
+function createKafkaEnvelopePublisher(brokers: string[]): EnvelopePublisher {
+  const producer = new Producer({
+    clientId: 'pubsub-broadcaster-producer',
+    bootstrapBrokers: brokers,
+  });
   let connected = false;
-  let connectPromise: Promise<void> | undefined;
-
-  async function ensureConnected() {
-    if (!connected) {
-      if (!connectPromise) {
-        connectPromise = producer.connect().then(() => {
-          connected = true;
-        });
-      }
-
-      try {
-        await connectPromise;
-      } catch (error) {
-        connectPromise = undefined;
-        throw error;
-      }
-    }
-  }
 
   return {
-    connect: () => ensureConnected(),
-    async disconnect() {
-      if (connectPromise) {
-        try {
-          await connectPromise;
-        } catch {
-          // ignore connect failures; producer isn't connected
-        }
-      }
-
+    async connect() {
       if (!connected) {
-        connectPromise = undefined;
-        return;
+        connected = true;
       }
-
-      await producer.disconnect();
-      connected = false;
-      connectPromise = undefined;
+    },
+    async disconnect() {
+      if (connected) {
+        connected = false;
+      }
     },
     async publish(topic: string, key: string, envelope: Envelope) {
-      await ensureConnected();
       await producer.send({
-        topic,
         messages: [
           {
+            topic,
             key,
-            value: JSON.stringify(envelope)
-          }
-        ]
+            value: JSON.stringify(envelope),
+          },
+        ],
       });
-    }
+    },
   };
 }
 
-async function createLibp2pPubsubClient(): Promise<PubsubClient> {
-  const node = await createLibp2p({
-    services: {
-      pubsub: gossipsub() as never
-    } as never
-  });
-
-  const reservedPeers = new Set<string>();
-  let redialTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Create an IPFS Kubo RPC client for PubSub messaging
+ */
+async function createIpfsPubsubClient(apiUrl: string): Promise<PubsubClient> {
+  const client: KuboRPCClient = createKuboClient({ url: apiUrl });
+  let started = false;
 
   return {
     async start() {
-      await node.start();
+      // Verify connection to Kubo
+      try {
+        const version = await client.version();
+        logInfo('connected to IPFS node', {
+          version: version.version,
+          apiUrl,
+        });
+        started = true;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const wrappedError = new Error(
+          `Failed to connect to IPFS at ${apiUrl}: ${errorMessage}`,
+          { cause: error }
+        );
+        throw wrappedError;
+      }
     },
     async stop() {
-      if (redialTimer) {
-        clearInterval(redialTimer);
-        redialTimer = null;
+      if (!started) {
+        return;
       }
-      await node.stop();
-    },
-    async connectReservedPeers(peers: string[]) {
-      for (const peer of peers) {
-        reservedPeers.add(peer);
-        await safeDial(node, peer);
-      }
-
-      if (redialTimer) {
-        clearInterval(redialTimer);
-      }
-
-      redialTimer = setInterval(() => {
-        for (const peer of reservedPeers) {
-          void safeDial(node, peer);
-        }
-      }, 30_000);
+      started = false;
+      logInfo('IPFS pubsub client stopped');
     },
     async publish(topic: string, data: Uint8Array) {
-      await (node.services.pubsub as { publish: (currentTopic: string, currentData: Uint8Array) => Promise<void> }).publish(topic, data);
-    }
+      if (!started) {
+        throw new Error('IPFS pubsub client not started');
+      }
+      await client.pubsub.publish(topic, data);
+    },
   };
-}
-
-async function safeDial(node: Awaited<ReturnType<typeof createLibp2p>>, multiaddr: string) {
-  try {
-    await (node as unknown as { dial: (target: unknown) => Promise<unknown> }).dial(multiaddr);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown dial error';
-    logWarn('reserved peer dial failed', {
-      peer: multiaddr,
-      error: message
-    });
-  }
-}
-
-function safeJsonParse(raw: string): { success: true; data: unknown } | { success: false; error: string } {
-  try {
-    return { success: true, data: JSON.parse(raw) };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON payload'
-    };
-  }
-}
-
-function incrementOffset(offset: string): string {
-  return (BigInt(offset) + 1n).toString();
 }
 
 function isTransientPublishError(error: unknown): boolean {

@@ -3,18 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "bin": {
+    "fake-sensor": "dist/index.mjs"
+  },
   "scripts": {
+    "build": "tsdown",
     "fake-sensor": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },
   "dependencies": {
-    "@polkadot/util-crypto": "^13.5.9",
-    "json-canonicalize": "^1.1.1",
-    "pino": "^9.14.0"
+    "@buf/airalab_sensors-social-proto.bufbuild_es": "2.14.0-20260815104319-7f23b240b94d.1",
+    "@bufbuild/protobuf": "^2.14.0",
+    "@polkadot/util-crypto": "^14.0.3",
+    "@scp/contracts": "workspace:*",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
-    "tsx": "^4.20.3"
+    "tsdown": "^0.22.14",
+    "tsx": "^4.23.12"
   }
 }

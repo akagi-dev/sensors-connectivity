@@ -1,0 +1,22 @@
+{
+  "name": "@scp/whitelist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scp/contracts": "workspace:*",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14",
+    "tsx": "^4.23.12"
+  }
+}

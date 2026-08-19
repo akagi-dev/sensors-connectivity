@@ -1,7 +1,26 @@
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import { canonicalize } from 'json-canonicalize';
-import { cryptoWaitReady, ed25519PairFromSeed, ed25519Sign, encodeAddress } from '@polkadot/util-crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import {
+  cryptoWaitReady,
+  ed25519PairFromSeed,
+  ed25519Sign,
+  encodeAddress,
+} from '@polkadot/util-crypto';
+import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import { SignedEnvelopeSchema } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+import {
+  MessageSchema,
+  MetaSchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/core/v1/message_pb.js';
+import {
+  UrbanSchema,
+  UrbanSensorSchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/device/v1/urban_pb.js';
+import { BME280Schema } from '@buf/airalab_sensors-social-proto.bufbuild_es/sensor/v1/sensor_pb.js';
+import {
+  TemperatureSchema,
+  HumiditySchema,
+} from '@buf/airalab_sensors-social-proto.bufbuild_es/sensor/v1/measurement_pb.js';
 import pino from 'pino';
 
 export interface FakeSensorCliOptions {
@@ -16,11 +35,13 @@ export interface FakeSensorCliOptions {
 const DEFAULT_ENDPOINT_URL = 'http://localhost:3000/v1/telemetry';
 const DEFAULT_COUNT = 1;
 const DEFAULT_INTERVAL_MS = 1000;
-const DEFAULT_SIGNER_SEED_HEX = '0x0000000000000000000000000000000000000000000000000000000000000001';
+const DEFAULT_SIGNER_SEED_HEX =
+  '0x0000000000000000000000000000000000000000000000000000000000000001';
 
 const logger = pino({
   name: 'fake-sensor-cli',
-  level: process.env.FAKE_SENSOR_CLI_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info'
+  level:
+    process.env.FAKE_SENSOR_CLI_LOG_LEVEL ?? process.env.LOG_LEVEL ?? 'info',
 });
 
 function logInfo(message: string, context?: Record<string, unknown>): void {
@@ -31,17 +52,24 @@ function logWarn(message: string, context?: Record<string, unknown>): void {
   logger.warn(context ?? {}, message);
 }
 
-function logError(message: string, error: unknown, context?: Record<string, unknown>): void {
+function logError(
+  message: string,
+  error: unknown,
+  context?: Record<string, unknown>
+): void {
   logger.error(
     {
       ...(context ?? {}),
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     },
     message
   );
 }
 
-export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv): FakeSensorCliOptions {
+export function parseFakeSensorCliOptions(
+  args: string[],
+  env: NodeJS.ProcessEnv
+): FakeSensorCliOptions {
   const argValues = new Map<string, string>();
   const supportedKeys = new Set([
     'endpoint',
@@ -50,7 +78,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     'interval-ms',
     'sensor-zone',
     'sensor-id',
-    'sensor-id'
+    'sensor-id',
   ]);
 
   for (let i = 0; i < args.length; i += 1) {
@@ -73,7 +101,9 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     }
 
     const nextToken = args[i + 1];
-    const value = inlineValue ?? (nextToken && !nextToken.startsWith('--') ? nextToken : undefined);
+    const value =
+      inlineValue ??
+      (nextToken && !nextToken.startsWith('--') ? nextToken : undefined);
     if (value === undefined) {
       throw new Error(`Missing value for --${key}`);
     }
@@ -84,18 +114,29 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     argValues.set(key, value);
   }
 
-  const endpointUrl = argValues.get('endpoint') ?? env.SENSOR_FAKE_ENDPOINT_URL ?? DEFAULT_ENDPOINT_URL;
-  const signerSeedHex = argValues.get('signer-seed-hex') ?? env.SENSOR_FAKE_SIGNER_SEED_HEX ?? DEFAULT_SIGNER_SEED_HEX;
-  const count = parsePositiveInteger(argValues.get('count') ?? env.SENSOR_FAKE_COUNT, DEFAULT_COUNT);
-  const intervalMs = parseNonNegativeInteger(argValues.get('interval-ms') ?? env.SENSOR_FAKE_INTERVAL_MS, DEFAULT_INTERVAL_MS);
-  const sensorZone = argValues.get('sensor-zone') ?? env.SENSOR_FAKE_SENSOR_ZONE;
+  const endpointUrl =
+    argValues.get('endpoint') ??
+    env.SENSOR_FAKE_ENDPOINT_URL ??
+    DEFAULT_ENDPOINT_URL;
+  const signerSeedHex =
+    argValues.get('signer-seed-hex') ??
+    env.SENSOR_FAKE_SIGNER_SEED_HEX ??
+    DEFAULT_SIGNER_SEED_HEX;
+  const count = parsePositiveInteger(
+    argValues.get('count') ?? env.SENSOR_FAKE_COUNT,
+    DEFAULT_COUNT
+  );
+  const intervalMs = parseNonNegativeInteger(
+    argValues.get('interval-ms') ?? env.SENSOR_FAKE_INTERVAL_MS,
+    DEFAULT_INTERVAL_MS
+  );
+  const sensorZone =
+    argValues.get('sensor-zone') ?? env.SENSOR_FAKE_SENSOR_ZONE;
   const seed = parseSeedHex(signerSeedHex);
   const signer = ed25519PairFromSeed(seed);
-  const derivedAddress = encodeAddress(signer.publicKey);
+  const derivedAddress = encodeAddress(signer.publicKey, 32);
   const sensorId =
-    argValues.get('sensor-id') ??
-    env.SENSOR_FAKE_SENSOR_ID ??
-    derivedAddress;
+    argValues.get('sensor-id') ?? env.SENSOR_FAKE_SENSOR_ID ?? derivedAddress;
 
   if (sensorId !== derivedAddress) {
     throw new Error(`sensor id does not match signer seed: ${sensorId}`);
@@ -106,7 +147,7 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
     sensorId,
     count,
     intervalMs,
-    signerSeedHex
+    signerSeedHex,
   };
 
   if (sensorZone) {
@@ -116,19 +157,17 @@ export function parseFakeSensorCliOptions(args: string[], env: NodeJS.ProcessEnv
   return options;
 }
 
-export function createFakePayload(sensorId: string) {
-  return {
-    sensor_id: sensorId,
-    timestamp: new Date().toISOString(),
-    nonce: randomUUID(),
-    measurements: {
-      temperature_c: Number((18 + Math.random() * 8).toFixed(2)),
-      humidity_pct: Number((30 + Math.random() * 40).toFixed(2))
-    }
-  };
+export interface FakeEnvelopePayload {
+  envelopeBytes: Uint8Array;
+  sensorAddress: string;
+  timestamp: bigint;
+  nonce: Uint8Array;
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number
+): number {
   if (value === undefined) {
     return fallback;
   }
@@ -141,7 +180,10 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   return parsed;
 }
 
-function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
+function parseNonNegativeInteger(
+  value: string | undefined,
+  fallback: number
+): number {
   if (value === undefined) {
     return fallback;
   }
@@ -162,15 +204,143 @@ function parseSeedHex(seedHex: string): Uint8Array {
   return Uint8Array.from(Buffer.from(normalizedSeed, 'hex'));
 }
 
-function signPayload(
-  payload: ReturnType<typeof createFakePayload>,
+function createCoreMessageBytes(
+  ownerPublicKey: Uint8Array,
+  temperatureCelsius: number,
+  humidityPercent: number
+): Uint8Array {
+  const temperatureSensor = create(UrbanSensorSchema, {
+    sensor: {
+      case: 'bme280',
+      value: create(BME280Schema, {
+        measurement: {
+          case: 'temperature',
+          value: create(TemperatureSchema, { celsius: temperatureCelsius }),
+        },
+      }),
+    },
+  });
+
+  const humiditySensor = create(UrbanSensorSchema, {
+    sensor: {
+      case: 'bme280',
+      value: create(BME280Schema, {
+        measurement: {
+          case: 'humidity',
+          value: create(HumiditySchema, { percent: humidityPercent }),
+        },
+      }),
+    },
+  });
+
+  const urban = create(UrbanSchema, {
+    public: [temperatureSensor, humiditySensor],
+    private: [],
+  });
+
+  const message = create(MessageSchema, {
+    metadata: create(MetaSchema, { owner: ownerPublicKey }),
+    payload: {
+      case: 'urban',
+      value: urban,
+    },
+  });
+
+  return toBinary(MessageSchema, message);
+}
+
+export interface DecodedCoreMessage {
+  metadata?: { owner: Uint8Array };
+  payload?: {
+    case: 'urban';
+    value: {
+      public?: Array<{
+        sensor?:
+          | {
+              case: 'bme280';
+              value: {
+                measurement?:
+                  | {
+                      case: 'temperature';
+                      value?: { celsius?: number };
+                    }
+                  | {
+                      case: 'humidity';
+                      value?: { percent?: number };
+                    };
+              };
+            }
+          | { case: undefined };
+      }>;
+    };
+  };
+}
+
+export function decodeCoreMessageBytes(bytes: Uint8Array): DecodedCoreMessage {
+  const message = fromBinary(MessageSchema, bytes);
+  return message as unknown as DecodedCoreMessage;
+}
+
+/**
+ * Build signing bytes for envelope (sensor_id || timestamp_le || nonce || message)
+ */
+function buildEnvelopeSigningBytes(
+  sensorId: Uint8Array,
+  timestamp: bigint,
+  nonce: Uint8Array,
+  message: Uint8Array
+): Uint8Array {
+  const timestampBytes = new Uint8Array(8);
+  new DataView(timestampBytes.buffer).setBigUint64(0, timestamp, true);
+  const total = sensorId.length + 8 + nonce.length + message.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  out.set(sensorId, offset);
+  offset += sensorId.length;
+  out.set(timestampBytes, offset);
+  offset += 8;
+  out.set(nonce, offset);
+  offset += nonce.length;
+  out.set(message, offset);
+  return out;
+}
+
+export function createFakeEnvelopePayload(
   signerSeedHex: string
-): string {
+): FakeEnvelopePayload {
   const pair = ed25519PairFromSeed(parseSeedHex(signerSeedHex));
-  const canonicalMeasurements = canonicalize(payload.measurements);
-  const message = `${canonicalMeasurements}${payload.timestamp}${payload.nonce}${payload.sensor_id}`;
-  const signature = ed25519Sign(new TextEncoder().encode(message), pair);
-  return Buffer.from(signature).toString('base64');
+  const temperature = Number((18 + Math.random() * 8).toFixed(2));
+  const humidity = Number((30 + Math.random() * 40).toFixed(2));
+  const messageBytes = createCoreMessageBytes(
+    pair.publicKey,
+    temperature,
+    humidity
+  );
+  const timestamp = BigInt(Date.now());
+  const nonce = randomBytes(16);
+
+  const signingBytes = buildEnvelopeSigningBytes(
+    pair.publicKey,
+    timestamp,
+    nonce,
+    messageBytes
+  );
+  const signature = ed25519Sign(signingBytes, pair);
+
+  const envelope = create(SignedEnvelopeSchema, {
+    sensorId: pair.publicKey,
+    timestamp,
+    nonce,
+    message: messageBytes,
+    signature,
+  });
+
+  return {
+    envelopeBytes: toBinary(SignedEnvelopeSchema, envelope),
+    sensorAddress: encodeAddress(pair.publicKey, 32),
+    timestamp,
+    nonce,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -197,7 +367,10 @@ Environment variable equivalents:
   SENSOR_FAKE_INTERVAL_MS`);
 }
 
-export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): Promise<number> {
+export async function runFakeSensorCli(
+  args: string[],
+  env: NodeJS.ProcessEnv
+): Promise<number> {
   if (args.includes('--help')) {
     printUsage();
     return 0;
@@ -213,14 +386,10 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
   }
 
   for (let i = 0; i < options.count; i += 1) {
-    const unsignedPayload = createFakePayload(options.sensorId);
-    const payload = {
-      ...unsignedPayload,
-      signature: signPayload(unsignedPayload, options.signerSeedHex)
-    };
+    const payload = createFakeEnvelopePayload(options.signerSeedHex);
     const headers: Record<string, string> = {
-      'content-type': 'application/json; charset=utf-8',
-      'x-request-id': randomUUID()
+      'content-type': 'application/protobuf',
+      'x-request-id': randomUUID(),
     };
 
     if (options.sensorZone) {
@@ -230,21 +399,26 @@ export async function runFakeSensorCli(args: string[], env: NodeJS.ProcessEnv): 
     logInfo('sending telemetry payload', {
       iteration: i + 1,
       total: options.count,
-      payload
+      sensor_id: payload.sensorAddress,
+      timestamp: Number(payload.timestamp),
+      nonce_hex: Buffer.from(payload.nonce).toString('hex'),
     });
 
     try {
       const response = await fetch(options.endpointUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload)
+        body: Buffer.from(payload.envelopeBytes),
       });
       if (response.ok) {
-        logInfo('response received', { status: response.status, statusText: response.statusText });
+        logInfo('response received', {
+          status: response.status,
+          statusText: response.statusText,
+        });
       } else {
         logWarn('response received with non-ok status', {
           status: response.status,
-          statusText: response.statusText
+          statusText: response.statusText,
         });
       }
       if (!response.ok) {
