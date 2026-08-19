@@ -81,28 +81,8 @@ The system accepts Ed25519-signed environmental sensor telemetry (Altruist-serie
 ## Core Kafka topics
 - `telemetry.authorized.v1`
 - `telemetry.rejected.v1`
-- `telemetry.pubsub.result.v1`
-- `telemetry.ipfs.result.v1`
-- `telemetry.blockchain.result.v1`
-- `telemetry.retry.v1`
+- `ipfs.published.v1`
 - `telemetry.dlq.v1`
-
-## Delivery semantics and processing rule
-- Target semantics: at-least-once delivery + idempotent consumers (effectively-once behavior).
-- Consumer rule:
-  1. Consume event.
-  2. Execute external action.
-  3. Wait for confirmation.
-  4. Emit result event.
-  5. Commit offset.
-- Offsets must not be committed before external action/result handling succeeds.
-
-## Idempotency and deduplication
-- All downstream consumers must be idempotent.
-- Dedup keys depend on module:
-  - `event_id` for event-level operations.
-  - `batch_id` for IPFS batch operations.
-  - `cid` for blockchain anchoring operations.
 
 ## Error handling baseline
 - Bounded retries for transient failures.

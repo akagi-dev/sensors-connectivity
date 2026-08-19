@@ -1,9 +1,23 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import {
   TELEMETRY_TOPICS,
-  createEnvelope,
-  serializeEnvelope,
+  EnvelopeSchema,
   TelemetryAuthorizedPayloadSchema,
-} from '@scp/contracts';
+} from '@scp/core';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,7 +47,7 @@ function authorizedEnvelope(sensorId: string) {
     signedEnvelope,
   });
 
-  const envelope = createEnvelope({
+  const envelope = create(EnvelopeSchema, {
     eventId: `evt-${sensorId}`,
     eventType: TELEMETRY_TOPICS.AUTHORIZED,
     eventVersion: 'v1',
@@ -42,11 +56,11 @@ function authorizedEnvelope(sensorId: string) {
     payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
   });
 
-  return Buffer.from(serializeEnvelope(envelope));
+  return Buffer.from(toBinary(EnvelopeSchema, envelope));
 }
 
 function encodeSensorId(sensorId: string): string {
-  return Buffer.from(sensorId.padEnd(32, '_').slice(0, 32)).toString('base64');
+  return Buffer.from(sensorId.padEnd(32, '_').slice(0, 32)).toString('hex');
 }
 
 class FakeRedis {

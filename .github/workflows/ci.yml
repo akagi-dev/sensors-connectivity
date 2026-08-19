@@ -10,6 +10,20 @@ permissions:
   contents: read
 
 jobs:
+  check-license:
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ job.status }}
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v7
+      - name: Check license
+        uses: viperproject/check-license-header@v2
+        with:
+          path: ./
+          config: ./.github/license-check/config.json
+          strict: false
+
   unit-tests:
     runs-on: ubuntu-latest
     steps:

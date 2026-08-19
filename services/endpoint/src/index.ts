@@ -1,13 +1,32 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fileURLToPath } from 'node:url';
-import type { TelemetryRejectedPayload, SignedEnvelope } from '@scp/contracts';
+import { create } from '@bufbuild/protobuf';
+import { SignedEnvelope } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
+import type { TelemetryRejectedPayload } from '@scp/core';
 import {
   formatSensorId,
   validateSignedEnvelope,
   REJECTION_CODES,
-} from '@scp/contracts';
+  TelemetryRejectedPayloadSchema,
+  TelemetryAuthorizedPayloadSchema,
+} from '@scp/core';
 import {
   createRegistryReaderFromEnv,
   type RegistryReader,
@@ -15,14 +34,14 @@ import {
 import {
   createEndpointEventProducer,
   type EndpointEventProducer,
-} from './kafka-producer.js';
+} from './producer.js';
+import { Producer } from '@platformatic/kafka';
 import { loadEndpointConfig } from './config.js';
-import { verifyTelemetrySignature } from './signature.js';
 import {
   createSensorAuthProvider,
   loadSensorAuthConfig,
 } from './sensor-auth-factory.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { logDebug, logError, logInfo, logWarn } from './logger.js';
 
 export interface EndpointDeps {
   registryReader: RegistryReader;
@@ -33,10 +52,10 @@ export interface EndpointAppOptions {
   timestampSkewSeconds?: number;
 }
 
-function parseSignedEnvelope(request: FastifyRequest): {
+async function parseSignedEnvelope(request: FastifyRequest): Promise<{
   envelope: SignedEnvelope;
   rawBytes: Uint8Array;
-} {
+}> {
   const contentType = request.headers['content-type']?.toLowerCase() ?? '';
   if (
     !contentType.includes('application/protobuf') &&
@@ -48,7 +67,7 @@ function parseSignedEnvelope(request: FastifyRequest): {
     throw new Error('Expected binary protobuf request body');
   }
   const rawBytes = Uint8Array.from(request.body);
-  return { envelope: validateSignedEnvelope(rawBytes), rawBytes };
+  return { envelope: await validateSignedEnvelope(rawBytes, true), rawBytes };
 }
 
 export function createEndpointApp(
@@ -93,15 +112,18 @@ export function createEndpointApp(
       let rawEnvelopeBytes: Uint8Array;
 
       try {
-        const parsed = parseSignedEnvelope(request);
+        const parsed = await parseSignedEnvelope(request);
         parsedEnvelope = parsed.envelope;
         rawEnvelopeBytes = parsed.rawBytes;
       } catch (error) {
         metrics.rejected += 1;
-        logWarn('telemetry rejected due to invalid envelope', {
-          trace_id: traceId,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        logWarn(
+          'telemetry rejected due to invalid envelope (corrupted or bad signature)',
+          {
+            trace_id: traceId,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
         return reply
           .code(400)
           .send({ status: 'rejected', error_code: 'invalid_envelope' });
@@ -137,11 +159,13 @@ export function createEndpointApp(
         skewMs > timestampSkewSeconds * 1000
       ) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.STALE_TIMESTAMP,
-          reasonMessage: 'Timestamp outside allowed skew window',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.STALE_TIMESTAMP,
+            reasonMessage: 'Timestamp outside allowed skew window',
+          })
+        );
         return reply
           .code(401)
           .send({ status: 'rejected', error_code: 'stale_timestamp' });
@@ -152,11 +176,13 @@ export function createEndpointApp(
       );
       if (!record || !record.enabled) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.SENSOR_FORBIDDEN,
-          reasonMessage: 'Sensor is unknown or disabled',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.SENSOR_FORBIDDEN,
+            reasonMessage: 'Sensor is unknown or disabled',
+          })
+        );
         return reply
           .code(403)
           .send({ status: 'rejected', error_code: 'sensor_forbidden' });
@@ -168,43 +194,29 @@ export function createEndpointApp(
       );
       if (nonceSeen) {
         metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.DUPLICATE_NONCE,
-          reasonMessage: 'Nonce already used for this sensor',
-        });
+        publishRejectedEvent(
+          create(TelemetryRejectedPayloadSchema, {
+            sensorId: parsedEnvelope.sensorId,
+            reasonCode: REJECTION_CODES.DUPLICATE_NONCE,
+            reasonMessage: 'Nonce already used for this sensor',
+          })
+        );
         return reply
           .code(409)
           .send({ status: 'rejected', error_code: 'duplicate_nonce' });
       }
 
-      const signatureValid = await verifyTelemetrySignature({
-        sensorId: parsedEnvelope.sensorId,
-        timestamp: parsedEnvelope.timestamp,
-        nonce: parsedEnvelope.nonce,
-        message: parsedEnvelope.message,
-        signature: parsedEnvelope.signature,
-        signerAddress: record.sensorId,
+      logDebug('sensor message validation pass', {
+        trace_id: traceId,
+        sensor_id: formatSensorId(parsedEnvelope.sensorId),
       });
-
-      if (!signatureValid) {
-        metrics.rejected += 1;
-        publishRejectedEvent({
-          sensorId: parsedEnvelope.sensorId,
-          reasonCode: REJECTION_CODES.INVALID_SIGNATURE,
-          reasonMessage: 'Signature verification failed',
-        });
-        return reply
-          .code(401)
-          .send({ status: 'rejected', error_code: 'invalid_signature' });
-      }
 
       try {
         await deps.producer.publishAuthorized(
-          {
+          create(TelemetryAuthorizedPayloadSchema, {
             sensorId: parsedEnvelope.sensorId,
             signedEnvelope: rawEnvelopeBytes,
-          },
+          }),
           traceId
         );
       } catch (error) {
@@ -253,8 +265,6 @@ export async function startEndpoint(): Promise<FastifyInstance> {
     auth_strategy: authConfig.strategy,
     kafka_broker_count: config.kafkaBrokers.length,
     timestamp_skew_seconds: config.timestampSkewSeconds,
-    producer_max_attempts: config.producerMaxAttempts,
-    producer_retry_backoff_ms: config.producerRetryBackoffMs,
   });
 
   const registryReader = createSensorAuthProvider(
@@ -262,15 +272,18 @@ export async function startEndpoint(): Promise<FastifyInstance> {
     createRegistryReaderFromEnv
   );
 
+  // Create Kafka producer with idempotence enabled
+  const kafkaProducer = new Producer({
+    clientId: 'endpoint',
+    bootstrapBrokers: config.kafkaBrokers,
+    idempotent: true,
+    acks: -1, // 'all' - wait for all in-sync replicas
+  });
+
   const app = createEndpointApp(
     {
       registryReader,
-      producer: createEndpointEventProducer(
-        config.kafkaBrokers,
-        config.source,
-        config.producerMaxAttempts,
-        config.producerRetryBackoffMs
-      ),
+      producer: createEndpointEventProducer(kafkaProducer, config.source),
     },
     {
       timestampSkewSeconds: config.timestampSkewSeconds,

@@ -1,25 +1,46 @@
-import { InMemoryRetryCounterStore, TELEMETRY_TOPICS } from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { TELEMETRY_TOPICS } from '@scp/core';
+import { create, toBinary } from '@bufbuild/protobuf';
+import { EnvelopeSchema, TelemetryAuthorizedPayloadSchema } from '@scp/core';
 import { describe, expect, it } from 'vitest';
-import {
-  processAuthorizedEnvelope,
-  type AuthorizedTelemetryMessage,
-} from '../src/index.js';
+import { handleTelemetryMessage } from '../src/index.js';
 import type { PubsubBroadcasterConfig } from '../src/config.js';
 
-function makeMessage(eventId: string): AuthorizedTelemetryMessage {
-  return {
-    eventId,
+function makeAuthorizedEnvelope(): Buffer {
+  const payload = create(TelemetryAuthorizedPayloadSchema, {
+    sensorId: Buffer.alloc(32, 1),
+    timestamp: BigInt(Date.parse('2026-01-01T00:00:00Z')),
+    nonce: Buffer.alloc(16, 2),
+    message: Buffer.from(JSON.stringify({ temp: 21 })),
+    signature: Buffer.alloc(64, 3),
+    signedEnvelope: Buffer.alloc(100, 4),
+  });
+
+  const envelope = create(EnvelopeSchema, {
+    eventId: 'evt-1',
     eventType: TELEMETRY_TOPICS.AUTHORIZED,
+    eventVersion: 'v1',
+    occurredAt: new Date().toISOString(),
+    source: 'test',
     traceId: 'trace-1',
-    payload: {
-      sensorId: Buffer.alloc(32, 1),
-      timestamp: BigInt(Date.parse('2026-01-01T00:00:00Z')),
-      nonce: Buffer.alloc(16, 2),
-      message: Buffer.from(JSON.stringify({ temp: 21 })),
-      signature: Buffer.alloc(64, 3),
-      signedEnvelope: Buffer.alloc(100, 4),
-    },
-  };
+    payload: toBinary(TelemetryAuthorizedPayloadSchema, payload),
+  });
+
+  return Buffer.from(toBinary(EnvelopeSchema, envelope));
 }
 
 function makeConfig(
@@ -30,230 +51,132 @@ function makeConfig(
     consumerGroupId: 'pubsub-broadcaster-v1',
     source: 'pubsub-broadcaster',
     healthPort: 3020,
-    maxRetries: 2,
-    retryBackoffMs: 0,
     pubsubTopic: 'telemetry/authorized/v1',
     ipfsApiUrl: 'http://localhost:5001',
-    reservedPeers: [],
     ...overrides,
   };
 }
 
 describe('pubsub broadcaster processing', () => {
-  it('maps authorized payload to configured pubsub topic and emits result event', async () => {
+  it('publishes authorized telemetry to configured pubsub topic', async () => {
     const publishedTopics: string[] = [];
-    const resultTopics: string[] = [];
+    const publishedData: Uint8Array[] = [];
     const metrics = {
       consumed: 0,
-      processed: 0,
       publishSuccess: 0,
       publishFailure: 0,
-      retryCount: 0,
-      dlqCount: 0,
-      consumerLag: 0,
     };
 
-    const status = await processAuthorizedEnvelope(
-      makeMessage('evt-success'),
-      async () => {},
-      {
-        config: makeConfig(),
-        pubsub: {
-          async start() {},
-          async stop() {},
-          async publish(topic) {
-            publishedTopics.push(topic);
-          },
-        },
-        publisher: {
-          async connect() {},
-          async disconnect() {},
-          async publish(topic) {
-            resultTopics.push(topic);
-          },
-        },
-        idempotencyStore: {
-          async has() {
-            return false;
-          },
-          async mark() {},
-        },
-        retryStore: new InMemoryRetryCounterStore(),
-        metrics,
-      }
+    const pubsub = {
+      async start() {},
+      async stop() {},
+      async publish(topic: string, data: Uint8Array) {
+        publishedTopics.push(topic);
+        publishedData.push(data);
+      },
+    };
+
+    await handleTelemetryMessage(
+      makeAuthorizedEnvelope(),
+      pubsub,
+      makeConfig(),
+      metrics
     );
 
-    expect(status).toBe('processed');
-    expect(publishedTopics).toEqual(['telemetry/authorized/v1']);
-    expect(resultTopics).toEqual([TELEMETRY_TOPICS.PUBSUB_RESULT]);
+    expect(metrics.consumed).toBe(1);
     expect(metrics.publishSuccess).toBe(1);
+    expect(metrics.publishFailure).toBe(0);
+    expect(publishedTopics).toEqual(['telemetry/authorized/v1']);
+    expect(publishedData.length).toBe(1);
   });
 
-  it('classifies non-transient publish errors as terminal and emits failed result without retry', async () => {
-    const publishedTopics: string[] = [];
+  it('logs failure but does not throw on publish error', async () => {
     const metrics = {
       consumed: 0,
-      processed: 0,
       publishSuccess: 0,
       publishFailure: 0,
-      retryCount: 0,
-      dlqCount: 0,
-      consumerLag: 0,
     };
 
-    const status = await processAuthorizedEnvelope(
-      makeMessage('evt-terminal'),
-      async () => {},
-      {
-        config: makeConfig(),
-        pubsub: {
-          async start() {},
-          async stop() {},
-          async publish() {
-            throw new Error('signature format invalid');
-          },
-        },
-        publisher: {
-          async connect() {},
-          async disconnect() {},
-          async publish(topic, _key, _envelope) {
-            publishedTopics.push(topic);
-            // Result envelope should be published even on failure
-          },
-        },
-        idempotencyStore: {
-          async has() {
-            return false;
-          },
-          async mark() {},
-        },
-        retryStore: new InMemoryRetryCounterStore(),
-        metrics,
-      }
+    const pubsub = {
+      async start() {},
+      async stop() {},
+      async publish() {
+        throw new Error('network timeout');
+      },
+    };
+
+    await handleTelemetryMessage(
+      makeAuthorizedEnvelope(),
+      pubsub,
+      makeConfig(),
+      metrics
     );
 
-    expect(status).toBe('processed');
-    expect(publishedTopics).toEqual([TELEMETRY_TOPICS.PUBSUB_RESULT]);
-    expect(metrics.retryCount).toBe(0);
+    expect(metrics.consumed).toBe(1);
+    expect(metrics.publishSuccess).toBe(0);
     expect(metrics.publishFailure).toBe(1);
   });
 
-  it('retries transient errors and routes exhausted attempts to DLQ', async () => {
-    const publishedTopics: string[] = [];
-    let commitCount = 0;
+  it('ignores non-authorized envelopes', async () => {
     const metrics = {
       consumed: 0,
-      processed: 0,
       publishSuccess: 0,
       publishFailure: 0,
-      retryCount: 0,
-      dlqCount: 0,
-      consumerLag: 0,
     };
 
-    const status = await processAuthorizedEnvelope(
-      makeMessage('evt-retry'),
-      async () => {
-        commitCount += 1;
+    const pubsub = {
+      async start() {},
+      async stop() {},
+      async publish() {
+        throw new Error('should not be called');
       },
-      {
-        config: makeConfig({ maxRetries: 2 }),
-        pubsub: {
-          async start() {},
-          async stop() {},
-          async publish() {
-            const error = new Error('network timeout') as Error & {
-              retriable: boolean;
-            };
-            error.retriable = true;
-            throw error;
-          },
-        },
-        publisher: {
-          async connect() {},
-          async disconnect() {},
-          async publish(topic) {
-            publishedTopics.push(topic);
-          },
-        },
-        idempotencyStore: {
-          async has() {
-            return false;
-          },
-          async mark() {},
-        },
-        retryStore: new InMemoryRetryCounterStore(),
-        metrics,
-      }
+    };
+
+    const rejectedEnvelope = create(EnvelopeSchema, {
+      eventId: 'evt-rejected',
+      eventType: TELEMETRY_TOPICS.REJECTED,
+      eventVersion: 'v1',
+      occurredAt: new Date().toISOString(),
+      source: 'test',
+      payload: Buffer.alloc(0),
+    });
+
+    await handleTelemetryMessage(
+      Buffer.from(toBinary(EnvelopeSchema, rejectedEnvelope)),
+      pubsub,
+      makeConfig(),
+      metrics
     );
 
-    expect(status).toBe('dlq');
-    expect(publishedTopics).toEqual([
-      TELEMETRY_TOPICS.RETRY,
-      TELEMETRY_TOPICS.DLQ,
-    ]);
-    expect(metrics.retryCount).toBe(1);
-    expect(metrics.dlqCount).toBe(1);
-    expect(commitCount).toBe(0);
+    expect(metrics.consumed).toBe(0);
+    expect(metrics.publishSuccess).toBe(0);
+    expect(metrics.publishFailure).toBe(0);
   });
 
-  it('is idempotent for repeated event_id processing', async () => {
-    const processedEventIds = new Set<string>();
-    let publishCount = 0;
-    let commitCount = 0;
+  it('handles malformed envelopes gracefully', async () => {
     const metrics = {
       consumed: 0,
-      processed: 0,
       publishSuccess: 0,
       publishFailure: 0,
-      retryCount: 0,
-      dlqCount: 0,
-      consumerLag: 0,
     };
 
-    const context = {
-      config: makeConfig(),
-      pubsub: {
-        async start() {},
-        async stop() {},
-        async publish() {
-          publishCount += 1;
-        },
+    const pubsub = {
+      async start() {},
+      async stop() {},
+      async publish() {
+        throw new Error('should not be called');
       },
-      publisher: {
-        async connect() {},
-        async disconnect() {},
-        async publish() {},
-      },
-      idempotencyStore: {
-        async has(eventId: string) {
-          return processedEventIds.has(eventId);
-        },
-        async mark(eventId: string) {
-          processedEventIds.add(eventId);
-        },
-      },
-      retryStore: new InMemoryRetryCounterStore(),
-      metrics,
     };
 
-    await processAuthorizedEnvelope(
-      makeMessage('evt-dup'),
-      async () => {
-        commitCount += 1;
-      },
-      context
-    );
-    const secondStatus = await processAuthorizedEnvelope(
-      makeMessage('evt-dup'),
-      async () => {
-        commitCount += 1;
-      },
-      context
+    await handleTelemetryMessage(
+      Buffer.from('invalid protobuf data'),
+      pubsub,
+      makeConfig(),
+      metrics
     );
 
-    expect(secondStatus).toBe('duplicate');
-    expect(publishCount).toBe(1);
-    expect(commitCount).toBe(2);
+    expect(metrics.consumed).toBe(0);
+    expect(metrics.publishSuccess).toBe(0);
+    expect(metrics.publishFailure).toBe(0);
   });
 });

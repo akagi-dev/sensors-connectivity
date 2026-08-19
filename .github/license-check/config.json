@@ -1,0 +1,10 @@
+[
+    {
+        "include": [
+            "**/*.ts"
+        ],
+        "exclude": [
+        ],
+        "license": "./.github/license-check/HEADER-APACHE2"
+    }
+]

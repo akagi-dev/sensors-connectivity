@@ -1,4 +1,18 @@
-import { runConsumerProcessingRule, TELEMETRY_TOPICS } from '@scp/contracts';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import Redis from 'ioredis';
 import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
@@ -14,11 +28,7 @@ import {
   type RegistryEvent,
 } from './keyspace.js';
 import { logDebug, logError, logInfo, logWarn } from './logger.js';
-import {
-  RedisProjectionStore,
-  RedisRetryCounterStore,
-  type RedisLike,
-} from './projection-store.js';
+import { RedisProjectionStore, type RedisLike } from './projection-store.js';
 
 export * from './chain-source.js';
 export * from './config.js';
@@ -31,8 +41,6 @@ interface RegistrySyncMetrics {
   latestFinalizedHeight: number;
   updateCount: number;
   failureCount: number;
-  retryCount: number;
-  dlqCount: number;
 }
 
 export interface RegistrySyncService {
@@ -59,7 +67,6 @@ export function createRegistrySyncService(
   const redis = deps.redis ?? new RedisClient(config.redisUrl);
   const keyspace = createRedisKeyspace(config.redisKeyPrefix);
   const projectionStore = new RedisProjectionStore(redis, keyspace);
-  const retryStore = new RedisRetryCounterStore(redis, keyspace);
   const eventSource =
     deps.eventSource ??
     new SubstrateFinalizedRegistryEventSource(config.substrateWsUrl);
@@ -72,8 +79,6 @@ export function createRegistrySyncService(
     latestFinalizedHeight: 0,
     updateCount: 0,
     failureCount: 0,
-    retryCount: 0,
-    dlqCount: 0,
   };
 
   async function processEvent(event: RegistryEvent): Promise<void> {
@@ -98,130 +103,111 @@ export function createRegistrySyncService(
       event.blockHeight
     );
 
-    let pending = true;
-    let loopAttempt = 1;
-    while (pending) {
-      logDebug('running consumer processing rule', {
+    // Check idempotency - skip if already processed
+    if (await projectionStore.hasProcessed(eventId)) {
+      logDebug('registry event already processed, skipping', { eventId });
+      await projectionStore.commitCursorHeight(event.blockHeight);
+      metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
+      return;
+    }
+
+    // Map event to projection update
+    const projection = mapRegistryEventToUpdate(event);
+    if (!projection) {
+      logError('registry event missing sensorId for projection', {
         eventId,
-        loopAttempt,
-      });
-      const result = await runConsumerProcessingRule(event, {
-        retryPolicy: {
-          maxAttempts: config.maxRetries,
-          getEventId: (current) => toChainEventId(current),
-          store: retryStore,
-        },
-        idempotency: {
-          getEventId: (current) => toChainEventId(current),
-          hasProcessed: (candidate) => projectionStore.hasProcessed(candidate),
-          markProcessed: (candidate) =>
-            projectionStore.markProcessed(candidate),
-        },
-        performExternalAction: async (current) => {
-          const projection = mapRegistryEventToUpdate(current);
-          if (!projection) {
-            throw new Error('Registry event missing sensorId for projection');
-          }
-
-          await projectionStore.applyProjection(projection, {
-            updatedAtBlock: current.blockHeight,
-            updatedAtEvent: eventId,
-          });
-
-          metrics.updateCount += 1;
-          logStructured('projection_updated', {
-            eventId,
-            blockHeight: current.blockHeight,
-            eventIndex: current.eventIndex,
-            section: current.section,
-            method: current.method,
-            sensorId: projection.sensorId,
-            enabled: projection.enabled,
-          });
-        },
-        waitForConfirmation: async () => {},
-        emitResultEvent: async (current) => ({
-          type: 'registry-sync.result',
-          eventId,
-          blockHeight: current.blockHeight,
-        }),
-        publishResultEvent: async () => {},
-        commitOffset: async () => {
-          await projectionStore.commitCursorHeight(event.blockHeight);
-          metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
-        },
-        retryDlqPublisher: {
-          publishRetry: async (_event, reason, context) => {
-            metrics.retryCount += 1;
-            metrics.failureCount += 1;
-            logStructured('projection_retry', {
-              eventId,
-              reason,
-              topic: context?.topic ?? TELEMETRY_TOPICS.RETRY,
-              attempt: context?.attempt,
-              maxAttempts: context?.maxAttempts,
-              blockHeight: event.blockHeight,
-              eventIndex: event.eventIndex,
-            });
-          },
-          publishDlq: async (failedEvent, reason, context) => {
-            metrics.dlqCount += 1;
-            metrics.failureCount += 1;
-            await projectionStore.publishDlq({
-              eventId,
-              blockHeight: failedEvent.blockHeight,
-              eventIndex: failedEvent.eventIndex,
-              reason,
-              context,
-              section: failedEvent.section,
-              method: failedEvent.method,
-              rawData: failedEvent.rawData,
-            });
-            logStructured('projection_dlq', {
-              eventId,
-              reason,
-              topic: context?.topic ?? TELEMETRY_TOPICS.DLQ,
-              attempt: context?.attempt,
-              maxAttempts: context?.maxAttempts,
-              blockHeight: event.blockHeight,
-              eventIndex: event.eventIndex,
-            });
-          },
-        },
+        blockHeight: event.blockHeight,
+        eventIndex: event.eventIndex,
+        section: event.section,
+        method: event.method,
       });
 
-      if (result === 'retried') {
-        logDebug('consumer processing requested retry', {
-          eventId,
-          attempt: loopAttempt,
-        });
-        logStructured('retry_backoff_wait', {
-          eventId,
-          retryBackoffMs: config.retryBackoffMs,
-        });
-        await sleep(config.retryBackoffMs);
-        loopAttempt += 1;
-        continue;
-      }
+      await projectionStore.publishDlq({
+        eventId,
+        blockHeight: event.blockHeight,
+        eventIndex: event.eventIndex,
+        reason: 'Registry event missing sensorId for projection',
+        section: event.section,
+        method: event.method,
+        rawData: event.rawData,
+      });
 
-      if (result === 'dlq') {
-        logWarn('registry event routed to DLQ', {
+      metrics.failureCount += 1;
+      await projectionStore.markProcessed(eventId);
+      await projectionStore.commitCursorHeight(event.blockHeight);
+      metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
+      return;
+    }
+
+    // Apply projection with retry logic
+    let attempt = 0;
+    let lastError: unknown = null;
+    while (attempt < config.maxRetries) {
+      attempt += 1;
+      try {
+        await projectionStore.applyProjection(projection, {
+          updatedAtBlock: event.blockHeight,
+          updatedAtEvent: eventId,
+        });
+
+        await projectionStore.markProcessed(eventId);
+        await projectionStore.commitCursorHeight(event.blockHeight);
+        metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
+        metrics.updateCount += 1;
+
+        logStructured('projection_updated', {
           eventId,
           blockHeight: event.blockHeight,
           eventIndex: event.eventIndex,
+          section: event.section,
+          method: event.method,
+          sensorId: projection.sensorId,
+          enabled: projection.enabled,
         });
-        await projectionStore.commitCursorHeight(event.blockHeight);
-        metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
-      }
 
-      logDebug('registry event processing completed', {
-        eventId,
-        result,
-        syncHeight: metrics.syncHeight,
-        latestFinalizedHeight: metrics.latestFinalizedHeight,
-      });
-      pending = false;
+        logDebug('registry event processing completed', {
+          eventId,
+          syncHeight: metrics.syncHeight,
+          latestFinalizedHeight: metrics.latestFinalizedHeight,
+        });
+        return;
+      } catch (error: unknown) {
+        lastError = error;
+        metrics.failureCount += 1;
+
+        if (attempt < config.maxRetries) {
+          logWarn('projection failed, will retry', {
+            eventId,
+            attempt,
+            maxRetries: config.maxRetries,
+            error: String(error),
+          });
+          await sleep(config.retryBackoffMs);
+        }
+      }
     }
+
+    // Exhausted retries - publish to DLQ
+    logError('projection exhausted retries, routing to DLQ', {
+      eventId,
+      blockHeight: event.blockHeight,
+      eventIndex: event.eventIndex,
+      error: lastError,
+    });
+
+    await projectionStore.publishDlq({
+      eventId,
+      blockHeight: event.blockHeight,
+      eventIndex: event.eventIndex,
+      reason: String(lastError),
+      section: event.section,
+      method: event.method,
+      rawData: event.rawData,
+    });
+
+    await projectionStore.markProcessed(eventId);
+    await projectionStore.commitCursorHeight(event.blockHeight);
+    metrics.syncHeight = Math.max(metrics.syncHeight, event.blockHeight);
   }
 
   return {
@@ -320,8 +306,6 @@ export function createRegistrySyncService(
         syncHeight: metrics.syncHeight,
         updateCount: metrics.updateCount,
         failureCount: metrics.failureCount,
-        retryCount: metrics.retryCount,
-        dlqCount: metrics.dlqCount,
       });
     },
     getMetrics(): Readonly<RegistrySyncMetrics> {
@@ -366,12 +350,6 @@ function startHealthAndMetricsServer(
           '# HELP registry_sync_failures_total Processing failures.',
           '# TYPE registry_sync_failures_total counter',
           `registry_sync_failures_total ${metrics.failureCount}`,
-          '# HELP registry_sync_retries_total Processing retries.',
-          '# TYPE registry_sync_retries_total counter',
-          `registry_sync_retries_total ${metrics.retryCount}`,
-          '# HELP registry_sync_dlq_total DLQ events emitted.',
-          '# TYPE registry_sync_dlq_total counter',
-          `registry_sync_dlq_total ${metrics.dlqCount}`,
         ].join('\n')
       );
       return;

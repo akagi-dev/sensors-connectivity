@@ -1,3 +1,18 @@
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import { type RegistryReader } from '@scp/registry-sync';
 import { WhitelistAuth, loadWhitelistConfig } from '@scp/whitelist';
 import { logInfo, logWarn } from './logger.js';
@@ -56,10 +71,10 @@ export function createSensorAuthProvider(
 
     // Adapt WhitelistAuth to RegistryReader interface
     return {
-      async authenticate(sensorId: string): Promise<boolean> {
+      async authenticate(sensorId: Uint8Array): Promise<boolean> {
         return whitelistAuth.authenticate(sensorId);
       },
-      async getSensorRecord(sensorId: string) {
+      async getSensorRecord(sensorId: Uint8Array) {
         const isAuthenticated = await whitelistAuth.authenticate(sensorId);
         if (!isAuthenticated) {
           return null;
@@ -69,10 +84,16 @@ export function createSensorAuthProvider(
           enabled: true,
         };
       },
-      async isNonceSeen(sensorId: string, nonce: string): Promise<boolean> {
+      async isNonceSeen(
+        sensorId: Uint8Array,
+        nonce: Uint8Array
+      ): Promise<boolean> {
         return whitelistAuth.isNonceSeen(sensorId, nonce);
       },
-      async rememberNonce(sensorId: string, nonce: string): Promise<void> {
+      async rememberNonce(
+        sensorId: Uint8Array,
+        nonce: Uint8Array
+      ): Promise<void> {
         await whitelistAuth.rememberNonce(sensorId, nonce);
       },
     };

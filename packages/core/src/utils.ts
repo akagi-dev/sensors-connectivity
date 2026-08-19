@@ -1,4 +1,23 @@
-import { encodeAddress } from '@polkadot/util-crypto';
+/**
+ * Copyright 2026 Robonomics Network
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+  encodeAddress,
+  ed25519Verify,
+  cryptoWaitReady,
+} from '@polkadot/util-crypto';
 import { fromBinary } from '@bufbuild/protobuf';
 import {
   SignedEnvelopeSchema,
@@ -42,7 +61,10 @@ export function buildEnvelopeSigningBytes(
  * Parse and validate SignedEnvelope from protobuf bytes.
  * Uses generated @bufbuild/protobuf code for parsing.
  */
-export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
+export async function validateSignedEnvelope(
+  bytes: Uint8Array,
+  checkSignature?: boolean | undefined
+): Promise<SignedEnvelope> {
   const envelope = fromBinary(SignedEnvelopeSchema, bytes);
   if (envelope.sensorId.length !== SENSOR_ID_LENGTH) {
     throw new Error(`sensor_id must be ${SENSOR_ID_LENGTH} bytes`);
@@ -61,6 +83,19 @@ export function validateSignedEnvelope(bytes: Uint8Array): SignedEnvelope {
   if (envelope.message.length === 0) {
     throw new Error('message must be non-empty');
   }
+
+  if (checkSignature) {
+    await cryptoWaitReady();
+    const isSignatureValid = ed25519Verify(
+      buildEnvelopeSigningBytes(envelope),
+      envelope.signature,
+      envelope.sensorId
+    );
+    if (!isSignatureValid) {
+      throw new Error('bad signature');
+    }
+  }
+
   return envelope;
 }
 

@@ -16,7 +16,7 @@
 
 ### Testing single files
 - `pnpm --filter @scp/<name> test <pattern>` - Run specific test file
-- Example: `pnpm --filter @scp/contracts test contracts.test.ts`
+- Example: `pnpm --filter @scp/core test contracts.test.ts`
 
 ### Fake sensor CLI (for debugging/integration testing)
 ```bash
@@ -65,7 +65,7 @@ Robonomics Blockchain → registry-sync → Redis → endpoint (lookup during va
 - `telemetry.dlq.v1` - Exhausted retries (dead letters)
 
 ### Workspace Structure
-- `packages/contracts` - Shared schemas, types, validation, and consumer runtime logic (`@scp/contracts`)
+- `packages/contracts` - Shared schemas, types, validation, and consumer runtime logic (`@scp/core`)
 - `services/endpoint` - HTTP ingress (Fastify, validates protobuf `SignedEnvelope`)
 - `services/registry-sync` - Blockchain→Redis sync (`@polkadot/api` → ioredis)
 - `services/whitelist` - Whitelist-based sensor auth provider
