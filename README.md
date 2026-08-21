@@ -5,40 +5,26 @@ TypeScript monorepo for the event-driven telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00 through WP-05 are fully implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`, `heartbeat-tracker`, `ipfs-publisher`, `blockchain-anchor`).
-
-## Stack
-
-- Node.js 22+ LTS + TypeScript (strict mode with extra-strict flags)
-- pnpm workspaces + Turborepo
-- tsup, vitest, eslint, prettier
-- Protobuf-es (`@bufbuild/protobuf`)
-- `@polkadot/util-crypto`, `@polkadot/api`, 
-- `kubo-rpc-client`, `ioredis`, `@platformatic/kafka`, Fastify
-
 ## Prerequisites
 
 - Node.js 22+ (`.nvmrc`)
 - pnpm 11+
 - Docker + Docker Compose
 
-## Install and run
+## Quick start
+
+Get the entire platform running with a single command:
 
 ```bash
-pnpm install
-cp .env.example .env
-docker compose up -d
+make all
 ```
 
-### Monorepo commands
-
-```bash
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm dev
-```
+This will:
+1. Install dependencies with pnpm
+2. Build all packages and services
+3. Start infrastructure (Kafka, Redis, IPFS, Robonomics)
+4. Initialize Kafka topics
+5. Start all services
 
 ## Workspace layout
 
@@ -52,18 +38,6 @@ services/heartbeat-tracker  # Observability: sensor liveness & uptime metrics
 services/ipfs-publisher    # Kafka→IPFS publisher (batches, produces CIDs)
 services/blockchain-anchor # IPFS CID→Robonomics CPS pallet anchoring
 tools/fake-sensor-cli      # Generate test telemetry with Ed25519 signatures
-```
-
-## Per-service development
-
-```bash
-pnpm --filter @scp/endpoint dev
-pnpm --filter @scp/registry-sync dev
-pnpm --filter @scp/whitelist dev
-pnpm --filter @scp/pubsub-broadcaster dev
-pnpm --filter @scp/heartbeat-tracker dev
-pnpm --filter @scp/ipfs-publisher dev
-pnpm --filter @scp/blockchain-anchor dev
 ```
 
 ## Fake sensor telemetry CLI
@@ -98,30 +72,6 @@ Available options:
 
 The CLI now sends binary protobuf `crypto.v1.SignedEnvelope` (`Content-Type: application/protobuf`) and includes `X-Request-Id` on every request. It exits with a non-zero code on invalid options, request failures, or non-2xx responses.
 
-## Kafka Message Format
-
-All Kafka messages use **binary protobuf encoding** with the following envelope structure:
-
-```protobuf
-message Envelope {
-  string event_id = 1;        // Unique event identifier (UUID)
-  string event_type = 2;      // e.g., "telemetry.authorized.v1"
-  string event_version = 3;   // Schema version
-  string occurred_at = 4;     // RFC3339 timestamp with timezone
-  optional string trace_id = 5; // Distributed tracing ID
-  string source = 6;          // Originating service name
-  bytes payload = 7;          // Event-specific protobuf payload
-}
-```
-
-### Event Types and Payloads
-
-| Event Type | Payload Schema | Description |
-|------------|---------------|-------------|
-| `telemetry.authorized.v1` | `TelemetryAuthorizedPayload` | Successfully validated sensor telemetry |
-| `telemetry.rejected.v1` | `TelemetryRejectedPayload` | Failed validation with rejection reason |
-| `ipfs.published.v1` | `TelemetryIpfsPublishedPayload` | IPFS publish result with CID |
-
 ### Rejection Reason Codes
 
 When telemetry validation fails, the endpoint emits `telemetry.rejected.v1` events with one of these reason codes:
@@ -136,24 +86,6 @@ When telemetry validation fails, the endpoint emits `telemetry.rejected.v1` even
 
 Use `REJECTION_CODES` from `@scp/core` to reference these codes in your code:
 
-```typescript
-import { REJECTION_CODES, getRejectionCodeDescription } from '@scp/core';
-
-// Check rejection reason
-if (payload.reasonCode === REJECTION_CODES.INVALID_SIGNATURE) {
-  console.error('Signature verification failed');
-}
-
-// Get human-readable description
-const description = getRejectionCodeDescription(payload.reasonCode);
-```
-
-
-## Protocol assets
-
-- Buf module: `buf.build/airalab/sensors-social-proto`
-- Generated SDK package: `@buf/airalab_sensors-social-proto.bufbuild_es`
-
 ## Service overview
 
 - **endpoint**: Validates `POST /v1/telemetry` (protobuf `crypto.v1.SignedEnvelope`), verifies Ed25519 signatures, checks sensor authorization via Redis projection, publishes `telemetry.authorized.v1` and `telemetry.rejected.v1`, returns `202` only after Kafka ACK. Supports pluggable authentication strategies (registry-sync or whitelist).
@@ -163,12 +95,3 @@ const description = getRejectionCodeDescription(payload.reasonCode);
 - **heartbeat-tracker**: Observability-only consumer of `telemetry.authorized.v1`, tracks sensor liveness (`firstSeen`, `lastSeen`, `onlineSince`) in Redis, exposes `sensors_online` count and per-sensor/aggregate uptime metrics over configurable online window (default 30s). Does not emit result events or participate in retry/DLQ.
 - **ipfs-publisher**: Consumes `telemetry.authorized.v1`, batches and publishes to IPFS (stubbed), emits `telemetry.ipfs.result.v1`.
 - **blockchain-anchor**: Consumes `telemetry.ipfs.result.v1`, deduplicates by CID, emits `telemetry.blockchain.result.v1`; phase-1 scope is CID-only anchoring (stubbed).
-
-## Local infrastructure
-
-`docker-compose.yml` provides:
-
-- Kafka + ZooKeeper
-- Redis
-- IPFS (Kubo RPC)
-- Robonomics substrate dev node

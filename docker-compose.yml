@@ -1,10 +1,11 @@
+version: '3.8'
 services:
   kafka:
     image: apache/kafka:4.3.1
     ports:
       - "9092:9092"
     volumes:
-      - ./docker/kafka-init-topics.sh:/docker-entrypoint-initdb.d/kafka-init-topics.sh:ro
+      - ./docker/kafka-init-topics.sh:/kafka-init-topics.sh:ro
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller

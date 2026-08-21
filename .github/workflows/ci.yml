@@ -34,6 +34,7 @@ jobs:
           echo "//buf.build/gen/npm/v1/:_authToken=${{ secrets.BUF_TOKEN }}" >> ~/.npmrc
       - uses: pnpm/setup@v2
       - run: pnpm build 
+      - run: docker-compose up -d
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm lint
