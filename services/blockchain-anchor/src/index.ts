@@ -61,9 +61,11 @@ async function sendSetPayloadExtrinsic(
   nodeId: number,
   cid: Uint8Array
 ): Promise<void> {
+  const cidString = CID.decode(cid).toString();
+
   logDebug('preparing set_payload extrinsic', {
     nodeId,
-    cid,
+    cid: cidString,
   });
 
   const account = keyring.addFromUri(suri);
@@ -79,7 +81,7 @@ async function sendSetPayloadExtrinsic(
 
   logInfo('submitting set_payload extrinsic', {
     nodeId,
-    cid,
+    cid: cidString,
     from: account.address,
   });
 
@@ -98,7 +100,7 @@ async function sendSetPayloadExtrinsic(
           logInfo('extrinsic in block', {
             blockHash: result.status.asInBlock.toString(),
             nodeId,
-            cid,
+            cid: cidString,
           });
         }
 
@@ -106,7 +108,7 @@ async function sendSetPayloadExtrinsic(
           logInfo('extrinsic finalized', {
             blockHash: result.status.asFinalized.toString(),
             nodeId,
-            cid,
+            cid: cidString,
           });
 
           if (unsub) {
@@ -134,7 +136,7 @@ async function sendSetPayloadExtrinsic(
               new Error('ExtrinsicFailed'),
               {
                 nodeId,
-                cid,
+                cid: cidString,
                 errorData: errorData?.toString(),
               }
             );
@@ -154,7 +156,7 @@ async function sendSetPayloadExtrinsic(
           const error = new Error('Transaction failed with status error');
           logError('extrinsic submission error', error, {
             nodeId,
-            cid,
+            cid: cidString,
             status: result.status.type,
           });
           reject(error);
@@ -166,7 +168,7 @@ async function sendSetPayloadExtrinsic(
       .catch((error) => {
         logError('failed to submit extrinsic', error, {
           nodeId,
-          cid,
+          cid: cidString,
         });
         reject(error);
       });
