@@ -25,9 +25,18 @@ message TelemetryRejectedPayload {
 
 // TelemetryIpfsPublishedPayload is emitted when events are published to IPFS.
 message TelemetryIpfsPublishedPayload {
+  enum Compression {
+    // No compression
+    COMPRESSION_NONE = 0;
+    // XZ compression algorithm
+    COMPRESSION_XZ = 1;
+  }
   // IPFS Content ID
   bytes cid = 1;
   
   // Number of events in this batch
   uint32 event_count = 2;
+
+  // If specified then compression applied to batch 
+  Compression compression = 3;
 }

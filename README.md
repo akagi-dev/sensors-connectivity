@@ -5,7 +5,7 @@ TypeScript monorepo for the event-driven telemetry pipeline described in:
 - [`project-architecture.md`](./docs/architecture/project-architecture.md)
 - [`integration-guide.md`](./docs/architecture/integration-guide.md)
 
-> Current phase: WP-00 through WP-03 are fully implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`, `heartbeat-tracker`). WP-04 (`ipfs-publisher`) and WP-05 (`blockchain-anchor`) remain scaffolded.
+> Current phase: WP-00 through WP-05 are fully implemented (`contracts`, `registry-sync`, `endpoint`, `pubsub-broadcaster`, `heartbeat-tracker`, `ipfs-publisher`, `blockchain-anchor`).
 
 ## Stack
 
@@ -50,7 +50,7 @@ services/whitelist         # Whitelist-based sensor authentication provider
 services/pubsub-broadcaster # Kafka→libp2p GossipSub bridge for real-time web UI
 services/heartbeat-tracker  # Observability: sensor liveness & uptime metrics
 services/ipfs-publisher    # Kafka→IPFS publisher (batches, produces CIDs)
-services/blockchain-anchor # IPFS CID→blockchain anchoring (stubbed)
+services/blockchain-anchor # IPFS CID→Robonomics CPS pallet anchoring
 tools/fake-sensor-cli      # Generate test telemetry with Ed25519 signatures
 ```
 

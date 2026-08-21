@@ -13,15 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export interface IpfsPublisherConfig {
+export interface BlockchainAnchorConfig {
   kafkaBrokers: string[];
   consumerGroupId: string;
-  source: string;
+  substrateWsUrl: string;
+  suri: string;
+  nodeId: number;
   healthPort: number;
-  ipfsApiUrl: string;
-  batchSize: number;
-  batchTimeoutMs: number;
-  enableCompression: boolean;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -29,23 +27,39 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export function loadIpfsPublisherConfig(
+export function loadBlockchainAnchorConfig(
   env: NodeJS.ProcessEnv = process.env
-): IpfsPublisherConfig {
+): BlockchainAnchorConfig {
+  const nodeId = env.BLOCKCHAIN_ANCHOR_NODE_ID;
+  if (!nodeId) {
+    throw new Error(
+      'BLOCKCHAIN_ANCHOR_NODE_ID is required (the CPS node ID to update)'
+    );
+  }
+
+  const nodeIdParsed = Number.parseInt(nodeId, 10);
+  if (!Number.isFinite(nodeIdParsed) || nodeIdParsed < 0) {
+    throw new Error(
+      `BLOCKCHAIN_ANCHOR_NODE_ID must be a non-negative integer, got: ${nodeId}`
+    );
+  }
+
+  const suri = env.BLOCKCHAIN_ANCHOR_SURI;
+  if (!suri) {
+    throw new Error(
+      'BLOCKCHAIN_ANCHOR_SURI is required (account seed/mnemonic for signing)'
+    );
+  }
+
   return {
     kafkaBrokers: (env.KAFKA_BROKERS ?? 'localhost:9092')
       .split(',')
       .map((broker) => broker.trim())
       .filter((broker) => broker.length > 0),
-    consumerGroupId: env.IPFS_PUBLISHER_GROUP_ID ?? 'ipfs-publisher-v1',
-    source: env.IPFS_PUBLISHER_SOURCE ?? 'ipfs-publisher',
-    healthPort: parsePositiveInt(env.IPFS_PUBLISHER_HEALTH_PORT, 3040),
-    ipfsApiUrl: env.IPFS_API_URL ?? 'http://localhost:5001',
-    batchSize: parsePositiveInt(env.IPFS_PUBLISHER_BATCH_SIZE, 10),
-    batchTimeoutMs: parsePositiveInt(
-      env.IPFS_PUBLISHER_BATCH_TIMEOUT_MS,
-      30000
-    ),
-    enableCompression: env.IPFS_PUBLISHER_ENABLE_COMPRESSION !== 'false',
+    consumerGroupId: env.BLOCKCHAIN_ANCHOR_GROUP_ID ?? 'blockchain-anchor-v1',
+    substrateWsUrl: env.SUBSTRATE_WS_URL ?? 'ws://localhost:9944',
+    suri,
+    nodeId: nodeIdParsed,
+    healthPort: parsePositiveInt(env.BLOCKCHAIN_ANCHOR_HEALTH_PORT, 3050),
   };
 }

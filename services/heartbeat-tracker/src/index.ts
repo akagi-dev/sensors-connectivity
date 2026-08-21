@@ -18,6 +18,7 @@ import {
   EnvelopeSchema,
   TelemetryAuthorizedPayloadSchema,
   type TelemetryAuthorizedPayload,
+  formatSensorId,
 } from '@scp/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import Redis from 'ioredis';
@@ -319,7 +320,8 @@ export function handleTelemetryMessage(
     logDebug('authorized envelope received', {
       eventId: envelope.eventId,
       eventType: envelope.eventType,
-      sensor_id: sensorIdHex,
+      trace_id: envelope.traceId,
+      sensor_id: formatSensorId(payload.sensorId),
     });
 
     consumed.value += 1;

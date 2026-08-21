@@ -18,11 +18,14 @@ import {
   EnvelopeSchema,
   TelemetryAuthorizedPayloadSchema,
   TelemetryIpfsPublishedPayloadSchema,
+  TelemetryIpfsPublishedPayload_Compression as Compression,
   type TelemetryAuthorizedPayload,
+  formatSensorId,
 } from '@scp/core';
 import { fromBinary, toBinary, create } from '@bufbuild/protobuf';
 import {
   SignedEnvelopeSchema,
+  SignedEnvelopeBatchSchema,
   type SignedEnvelope,
 } from '@buf/airalab_sensors-social-proto.bufbuild_es/crypto/v1/envelope_pb.js';
 import { Consumer, Producer } from '@platformatic/kafka';
@@ -30,6 +33,7 @@ import { createServer, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { CID } from 'multiformats/cid';
+import { compress } from '@napi-rs/lzma/xz';
 import {
   create as createKuboClient,
   type KuboRPCClient,
@@ -53,7 +57,7 @@ export interface IpfsPublisherService {
 interface IpfsClient {
   start(): Promise<void>;
   stop(): Promise<void>;
-  add(data: Uint8Array): Promise<string>;
+  add(data: Uint8Array, compressed: boolean): Promise<string>;
 }
 
 interface IpfsPublisherDeps {
@@ -73,18 +77,9 @@ interface BatchItem {
   signedEnvelope: SignedEnvelope;
   offset: bigint;
   partition: number;
-}
-
-/**
- * Serialize batch of SignedEnvelopes to NDJSON format
- * Each line is a base64-encoded SignedEnvelope protobuf message
- */
-function serializeBatch(batch: BatchItem[]): Uint8Array {
-  const lines = batch.map((item) => {
-    const binary = toBinary(SignedEnvelopeSchema, item.signedEnvelope);
-    return Buffer.from(binary).toString('base64');
-  });
-  return new TextEncoder().encode(lines.join('\n'));
+  sensorId: Uint8Array;
+  traceId?: string;
+  eventId: string;
 }
 
 /**
@@ -101,27 +96,49 @@ async function publishBatch(
     return;
   }
 
+  // Collect unique sensor IDs and trace IDs for logging
+  const uniqueSensorIds = Array.from(
+    new Set(batch.map((b) => formatSensorId(b.sensorId)))
+  );
+  const traceIds = Array.from(
+    new Set(
+      batch.map((b) => b.traceId).filter((id): id is string => id !== undefined)
+    )
+  );
+
   logInfo('publishing batch to IPFS', {
     batch_size: batch.length,
+    unique_sensors: uniqueSensorIds.length,
+    sensor_ids: uniqueSensorIds,
+    trace_ids: traceIds.length > 0 ? traceIds : undefined,
   });
 
   try {
-    // Serialize batch as NDJSON of base64-encoded SignedEnvelope messages
-    const batchData = serializeBatch(batch);
+    // Serialize batch
+    const batchData = create(SignedEnvelopeBatchSchema, {
+      batch: batch.map((b) => b.signedEnvelope),
+    });
 
     // Publish to IPFS
-    const cid = await ipfsClient.add(batchData);
+    const cid = await ipfsClient.add(
+      toBinary(SignedEnvelopeBatchSchema, batchData),
+      config.enableCompression
+    );
 
     logInfo('batch published to IPFS', {
       cid,
       event_count: batch.length,
-      size_bytes: batchData.length,
+      unique_sensors: uniqueSensorIds.length,
+      sensor_ids: uniqueSensorIds,
+      trace_ids: traceIds.length > 0 ? traceIds : undefined,
+      compression: config.enableCompression,
     });
 
     // Create result envelope
     const payload = create(TelemetryIpfsPublishedPayloadSchema, {
       cid: Buffer.from(CID.parse(cid).bytes),
       eventCount: batch.length,
+      compression: config.enableCompression ? Compression.XZ : Compression.NONE,
     });
 
     const resultEnvelope = create(EnvelopeSchema, {
@@ -149,12 +166,18 @@ async function publishBatch(
     logInfo('batch result published to Kafka', {
       cid,
       event_count: batch.length,
+      unique_sensors: uniqueSensorIds.length,
+      sensor_ids: uniqueSensorIds,
+      trace_ids: traceIds.length > 0 ? traceIds : undefined,
       result_topic: TELEMETRY_TOPICS.IPFS_PUBLISHED,
     });
   } catch (error) {
     metrics.publishFailure += 1;
     logError('batch publish failed', error, {
       batch_size: batch.length,
+      unique_sensors: uniqueSensorIds.length,
+      sensor_ids: uniqueSensorIds,
+      trace_ids: traceIds.length > 0 ? traceIds : undefined,
     });
     throw error;
   }
@@ -325,8 +348,22 @@ export function createIpfsPublisherService(
               }
             } catch (error) {
               // On failure, keep messages in batch for retry
+              const failedSensorIds = Array.from(
+                new Set(batchToPublish.map((b) => formatSensorId(b.sensorId)))
+              );
+              const failedTraceIds = Array.from(
+                new Set(
+                  batchToPublish
+                    .map((b) => b.traceId)
+                    .filter((id): id is string => id !== undefined)
+                )
+              );
               logWarn('batch flush failed, will retry on next message', {
                 batch_size: batchToPublish.length,
+                unique_sensors: failedSensorIds.length,
+                sensor_ids: failedSensorIds,
+                trace_ids:
+                  failedTraceIds.length > 0 ? failedTraceIds : undefined,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
@@ -369,14 +406,22 @@ export function createIpfsPublisherService(
 
                 metrics.consumed += 1;
 
-                currentBatch.push({
+                const batchItem: BatchItem = {
                   signedEnvelope,
                   offset: message.offset + 1n, // Next offset to commit
                   partition: message.partition,
-                });
+                  sensorId: payload.sensorId,
+                  eventId: envelope.eventId,
+                };
+                if (envelope.traceId !== undefined) {
+                  batchItem.traceId = envelope.traceId;
+                }
+                currentBatch.push(batchItem);
 
                 logDebug('message added to batch', {
                   event_id: envelope.eventId,
+                  trace_id: envelope.traceId,
+                  sensor_id: formatSensorId(payload.sensorId),
                   batch_size: currentBatch.length,
                   batch_max: config.batchSize,
                 });
@@ -564,11 +609,11 @@ async function createIpfsKuboClient(apiUrl: string): Promise<IpfsClient> {
       started = false;
       logInfo('IPFS client stopped');
     },
-    async add(data: Uint8Array): Promise<string> {
+    async add(data: Uint8Array, compressed: boolean): Promise<string> {
       if (!started) {
         throw new Error('IPFS client not started');
       }
-      const result = await client.add(data);
+      const result = await client.add(compressed ? await compress(data) : data);
       return result.cid.toString();
     },
   };

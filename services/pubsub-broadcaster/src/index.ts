@@ -123,6 +123,7 @@ export function handleTelemetryMessage(
     logDebug('authorized envelope received', {
       eventId: envelope.eventId,
       eventType: envelope.eventType,
+      trace_id: envelope.traceId,
       sensor_id: sensorIdFormatted,
     });
 
@@ -136,6 +137,7 @@ export function handleTelemetryMessage(
       .then(() => {
         metrics.publishSuccess += 1;
         logInfo('telemetry published to PubSub', {
+          trace_id: envelope.traceId,
           sensor_id: sensorIdFormatted,
           pubsub_topic: config.pubsubTopic,
         });
@@ -143,6 +145,7 @@ export function handleTelemetryMessage(
       .catch((error) => {
         metrics.publishFailure += 1;
         logWarn('PubSub publish failed (will not retry)', {
+          trace_id: envelope.traceId,
           sensor_id: sensorIdFormatted,
           error: error instanceof Error ? error.message : String(error),
         });
